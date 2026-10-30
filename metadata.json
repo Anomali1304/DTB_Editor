@@ -1,0 +1,6 @@
+{
+  "name": "DTB Studio",
+  "description": "Offline Device Tree (DTB/DTBO) editor, decompiler, and compiler for Android developers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
