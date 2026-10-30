@@ -47,7 +47,13 @@ class DtsParser {
                 val c = cleanText[pos]
                 if (c.isWhitespace()) {
                     pos++
-                } else if (c == '#' || (c == '/' && pos + 1 < len && cleanText[pos + 1] != '{' && !cleanText.startsWith("/dts-v1/", pos) && !cleanText.startsWith("/plugin/", pos) && !cleanText.startsWith("/memreserve/", pos) && !cleanText.startsWith("/delete-", pos))) {
+                } else if (c == '/' && pos + 1 < len && cleanText[pos + 1] == '/') {
+                    val lineEnd = cleanText.indexOf('\n', pos)
+                    pos = if (lineEnd != -1) lineEnd + 1 else len
+                } else if (c == '/' && pos + 1 < len && cleanText[pos + 1] == '*') {
+                    val endComment = cleanText.indexOf("*/", pos + 2)
+                    pos = if (endComment != -1) endComment + 2 else len
+                } else if (cleanText.startsWith("#include", pos) || cleanText.startsWith("#define", pos) || cleanText.startsWith("#pragma", pos) || cleanText.startsWith("#line", pos) || cleanText.startsWith("#ifdef", pos) || cleanText.startsWith("#ifndef", pos) || cleanText.startsWith("#endif", pos) || cleanText.startsWith("#else", pos) || cleanText.startsWith("#elif", pos)) {
                     val lineEnd = cleanText.indexOf('\n', pos)
                     pos = if (lineEnd != -1) lineEnd + 1 else len
                 } else if (cleanText.startsWith("/dts-v1/;", pos)) {
@@ -117,8 +123,11 @@ class DtsParser {
 
                     if (nodeHeader.startsWith("&")) {
                         val refTarget = nodeHeader.substring(1).trim('{', '}', ' ')
-                        val existingNode = rootNode.findNodeByPath(refTarget) ?: rootNode.children.firstOrNull { it.name == refTarget || it.label == refTarget }
+                        val existingNode = findNodeByPathOrLabel(rootNode, refTarget)
                         if (existingNode != null) {
+                            if (label != null && existingNode.label == null) {
+                                existingNode.label = label
+                            }
                             nodeStack.add(existingNode)
                         } else {
                             val refNode = FdtNode(name = refTarget, fullPath = "/$refTarget", label = label)
@@ -128,15 +137,23 @@ class DtsParser {
                     } else {
                         val nodeName = if (nodeHeader == "/" || nodeHeader.isEmpty()) "/" else nodeHeader
 
-                        if (nodeName == "/" && nodeStack.isEmpty()) {
-                            rootNode.label = label
+                        if (nodeName == "/") {
+                            if (label != null) rootNode.label = label
                             nodeStack.add(rootNode)
                         } else {
                             val parent = nodeStack.lastOrNull() ?: rootNode
-                            val fullPath = if (parent.fullPath == "/") "/$nodeName" else "${parent.fullPath}/$nodeName"
-                            val newNode = FdtNode(name = nodeName, fullPath = fullPath, label = label)
-                            parent.children.add(newNode)
-                            nodeStack.add(newNode)
+                            val existingChild = parent.children.firstOrNull { it.name == nodeName }
+                            if (existingChild != null) {
+                                if (label != null && existingChild.label == null) {
+                                    existingChild.label = label
+                                }
+                                nodeStack.add(existingChild)
+                            } else {
+                                val fullPath = if (parent.fullPath == "/") "/$nodeName" else "${parent.fullPath}/$nodeName"
+                                val newNode = FdtNode(name = nodeName, fullPath = fullPath, label = label)
+                                parent.children.add(newNode)
+                                nodeStack.add(newNode)
+                            }
                         }
                     }
                 }
@@ -157,7 +174,12 @@ class DtsParser {
                         val currentNode = nodeStack.lastOrNull() ?: rootNode
                         val prop = parsePropertyStatement(rawToken, warnings)
                         if (prop != null) {
-                            currentNode.properties.add(prop)
+                            val existingPropIndex = currentNode.properties.indexOfFirst { it.name == prop.name }
+                            if (existingPropIndex != -1) {
+                                currentNode.properties[existingPropIndex] = prop
+                            } else {
+                                currentNode.properties.add(prop)
+                            }
                         }
                     }
                 }
@@ -170,6 +192,27 @@ class DtsParser {
             errors = errors,
             warnings = warnings
         )
+    }
+
+    private fun findNodeByPathOrLabel(root: FdtNode, query: String): FdtNode? {
+        val clean = query.trim('/')
+        if (clean.isEmpty()) return root
+
+        val pathMatch = root.findNodeByPath(clean)
+        if (pathMatch != null) return pathMatch
+
+        fun search(node: FdtNode): FdtNode? {
+            if (node.label == clean || node.name == clean || node.name.startsWith("$clean@")) {
+                return node
+            }
+            for (child in node.children) {
+                val res = search(child)
+                if (res != null) return res
+            }
+            return null
+        }
+
+        return search(root)
     }
 
     private fun parsePropertyStatement(statement: String, warnings: MutableList<String>): FdtProperty? {

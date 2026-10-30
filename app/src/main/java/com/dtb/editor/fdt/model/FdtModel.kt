@@ -68,6 +68,17 @@ data class FdtProperty(
 ) {
     val size: Int get() = data.size
 
+    companion object {
+        private val NUMERIC_PROP_NAMES = setOf(
+            "reg", "ranges", "dma-ranges", "interrupts", "phandle", "linux,phandle",
+            "#address-cells", "#size-cells", "#interrupt-cells", "#clock-cells",
+            "#gpio-cells", "#reset-cells", "#phy-cells", "#dma-cells", "#pwm-cells",
+            "#cooling-cells", "#sound-dai-cells", "#thermal-sensor-cells", "#iommu-cells",
+            "#power-domain-cells", "clocks", "gpios", "resets", "phys", "pinctrl-0",
+            "pinctrl-1", "pinctrl-2", "dmas", "power-domains", "value", "mask", "offset"
+        )
+    }
+
     fun asU32List(): List<Long> {
         if (data.size % 4 != 0) return emptyList()
         val list = mutableListOf<Long>()
@@ -85,13 +96,24 @@ data class FdtProperty(
 
     fun isPrintableString(): Boolean {
         if (data.isEmpty()) return false
+        if (NUMERIC_PROP_NAMES.contains(name.lowercase())) return false
         if (data.last() != 0.toByte()) return false
-        for (i in 0 until data.size - 1) {
+
+        var strCount = 0
+        var currentStrLen = 0
+        for (i in data.indices) {
             val b = data[i].toInt() and 0xFF
-            if (b == 0) continue // multiple strings in array
-            if (b < 32 || b > 126) return false
+            if (b == 0) {
+                if (currentStrLen == 0) return false
+                strCount++
+                currentStrLen = 0
+            } else if (b in 32..126 || b == 9 || b == 10 || b == 13) {
+                currentStrLen++
+            } else {
+                return false
+            }
         }
-        return true
+        return strCount > 0
     }
 
     fun asStringList(): List<String> {

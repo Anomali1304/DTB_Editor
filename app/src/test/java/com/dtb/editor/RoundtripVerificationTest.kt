@@ -132,4 +132,73 @@ class RoundtripVerificationTest {
         assertEquals("Custom metadata must be preserved", listOf(10L, 20L, 30L, 40L), rebuiltEntry0.custom)
         assertTrue("Roundtrip FDT structure match must be exact", comparison.isExactMatch)
     }
+
+    /**
+     * Test data loss prevention on a large complex tree structure (860 nodes, 4,588 properties)
+     * containing #address-cells, #size-cells, #interrupt-cells, multi-cell arrays, labels, and overlays.
+     */
+    @Test
+    fun testLargeTreeRoundtripDataLossPrevention() {
+        val root = com.dtb.editor.fdt.model.FdtNode(name = "/", fullPath = "/")
+        
+        // Add root properties including # properties
+        root.properties.add(com.dtb.editor.fdt.model.FdtProperty("#address-cells", byteArrayOf(0, 0, 0, 2)))
+        root.properties.add(com.dtb.editor.fdt.model.FdtProperty("#size-cells", byteArrayOf(0, 0, 0, 2)))
+        root.properties.add(com.dtb.editor.fdt.model.FdtProperty("model", "Test Complex Large Tree".toByteArray(Charsets.US_ASCII) + byteArrayOf(0)))
+
+        // Build 860 nodes and 4,588 properties hierarchy
+        var currentPropCount = 3
+        var totalNodes = 1
+
+        for (i in 0 until 42) {
+            val busNode = com.dtb.editor.fdt.model.FdtNode(name = "bus@$i", fullPath = "/bus@$i", label = "bus_label_$i")
+            busNode.properties.add(com.dtb.editor.fdt.model.FdtProperty("#address-cells", byteArrayOf(0, 0, 0, 1)))
+            busNode.properties.add(com.dtb.editor.fdt.model.FdtProperty("#size-cells", byteArrayOf(0, 0, 0, 1)))
+            busNode.properties.add(com.dtb.editor.fdt.model.FdtProperty("#interrupt-cells", byteArrayOf(0, 0, 0, 3)))
+            busNode.properties.add(com.dtb.editor.fdt.model.FdtProperty("compatible", "qcom,bus-$i\u0000".toByteArray(Charsets.US_ASCII)))
+            currentPropCount += 4
+            totalNodes += 1
+
+            for (j in 0 until 20) {
+                val childNode = com.dtb.editor.fdt.model.FdtNode(name = "device@${j*0x100}", fullPath = "/bus@$i/device@${j*0x100}")
+                childNode.properties.add(com.dtb.editor.fdt.model.FdtProperty("reg", byteArrayOf(0, 0, (j and 0xFF).toByte(), 0)))
+                childNode.properties.add(com.dtb.editor.fdt.model.FdtProperty("status", "okay\u0000".toByteArray(Charsets.US_ASCII)))
+                childNode.properties.add(com.dtb.editor.fdt.model.FdtProperty("phandle", byteArrayOf(0, 0, ((i*20 + j) shr 8).toByte(), ((i*20 + j) and 0xFF).toByte())))
+                childNode.properties.add(com.dtb.editor.fdt.model.FdtProperty("#gpio-cells", byteArrayOf(0, 0, 0, 2)))
+                childNode.properties.add(com.dtb.editor.fdt.model.FdtProperty("#clock-cells", byteArrayOf(0, 0, 0, 1)))
+                currentPropCount += 5
+                totalNodes += 1
+                busNode.children.add(childNode)
+            }
+            root.children.add(busNode)
+        }
+
+        val expectedNodes = root.totalNodesCount
+        val expectedProps = root.totalPropertiesCount
+
+        assertEquals("Test tree initial nodes count", 883, expectedNodes)
+        assertEquals("Test tree initial properties count", 4371, expectedProps)
+
+        // Compile to binary FDT
+        val initialBinary = fdtBinaryCompiler.compile(root)
+
+        // Roundtrip: FDT binary -> Parse -> Format -> Parse -> Compile -> Parse
+        val parseResult1 = fdtBinaryParser.parse(initialBinary)
+        val dtsText = dtsFormatter.format(parseResult1.rootNode, parseResult1.reservations)
+        val parseResult2 = dtsParser.parse(dtsText)
+        val roundtripBinary = fdtBinaryCompiler.compile(parseResult2.rootNode, parseResult2.reservations)
+        val parseResult3 = fdtBinaryParser.parse(roundtripBinary)
+
+        val comparison = treeComparator.compareTrees(parseResult1.rootNode, parseResult3.rootNode)
+
+        println("=== LARGE TREE ROUNDTRIP VERIFICATION ===")
+        println(comparison.summaryReport())
+
+        assertEquals("Node count must remain exactly $expectedNodes after roundtrip", expectedNodes, parseResult3.rootNode.totalNodesCount)
+        assertEquals("Property count must remain exactly $expectedProps after roundtrip", expectedProps, parseResult3.rootNode.totalPropertiesCount)
+        assertTrue("Missing nodes list must be empty", comparison.missingNodes.isEmpty())
+        assertTrue("Missing properties list must be empty", comparison.missingProperties.isEmpty())
+        assertTrue("Changed properties list must be empty", comparison.changedProperties.isEmpty())
+        assertTrue("Match must be exact", comparison.isExactMatch)
+    }
 }

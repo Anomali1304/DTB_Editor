@@ -393,26 +393,36 @@ class DtbViewModel(
                             }
 
                             ExportTargetType.RAW_COMPILED_DTB -> {
-                                val output = dtcEngine.compileDtsText(current.sourceText)
-                                if (!output.success || output.compiledBytes == null) {
-                                    throw Exception("Compilation failed: Cannot export corrupt FDT")
+                                val bytes = if (!current.isDirty && current.originalBytes != null && current.fileType != DtbFileType.DT_TABLE) {
+                                    current.originalBytes
+                                } else {
+                                    val output = dtcEngine.compileDtsText(current.sourceText)
+                                    if (!output.success || output.compiledBytes == null) {
+                                        throw Exception("Compilation failed: Cannot export corrupt FDT")
+                                    }
+                                    output.compiledBytes
                                 }
-                                out.write(output.compiledBytes)
+                                out.write(bytes)
                             }
 
                             ExportTargetType.REBUILT_DT_TABLE -> {
                                 val container = current.dtTableContainer
                                     ?: throw Exception("Current workspace was not imported from an Android DT Table container image")
 
-                                val output = dtcEngine.compileDtsText(current.sourceText)
-                                if (!output.success || output.compiledBytes == null) {
-                                    throw Exception("Compilation failed: Cannot rebuild DT Table container with invalid FDT")
+                                val fdtBytesToUse = if (!current.isDirty) {
+                                    container.entries[current.selectedDtEntryIndex].fdtBytes
+                                } else {
+                                    val output = dtcEngine.compileDtsText(current.sourceText)
+                                    if (!output.success || output.compiledBytes == null) {
+                                        throw Exception("Compilation failed: Cannot rebuild DT Table container with invalid FDT")
+                                    }
+                                    output.compiledBytes
                                 }
 
                                 val rebuiltContainerBytes = dtTableParser.rebuild(
                                     container = container,
                                     updatedEntryIndex = current.selectedDtEntryIndex,
-                                    newFdtBytes = output.compiledBytes
+                                    newFdtBytes = fdtBytesToUse
                                 )
                                 out.write(rebuiltContainerBytes)
                             }
