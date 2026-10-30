@@ -1,9 +1,6 @@
 package com.dtb.editor.fdt.cpu
 
 import com.dtb.editor.fdt.model.FdtNode
-import com.dtb.editor.fdt.model.FdtProperty
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 
 data class CpuCoreInfo(
     val nodeName: String,
@@ -23,74 +20,47 @@ data class CpuTopologyState(
     val clusters: List<CpuCluster>,
     val totalCores: Int,
     val hasCpuMap: Boolean,
-    val diagnostics: List<String>
+    val cores: List<CpuCoreDetail> = emptyList(),
+    val controllerInfo: PerformanceControllerInfo? = null,
+    val assignedSlots: Map<Int, Long> = emptyMap(),
+    val diagnostics: List<String> = emptyList(),
+    val syncCpufreqSupported: Boolean = false,
+    val syncCpufreqEnabled: Boolean = true
 )
 
-class CpuTopologyManager {
-
-    /**
-     * Locate the /cpus node anywhere in the tree (handles root /cpus, labeled cpus:, and paths)
-     */
-    fun findCpusNode(rootNode: FdtNode): FdtNode? {
-        // Direct child
-        val direct = rootNode.findChild("cpus")
-            ?: rootNode.children.firstOrNull { it.name.startsWith("cpus") || it.label == "cpus" }
-        if (direct != null) return direct
-
-        // Recursive search for any node named cpus or label cpus
-        fun search(node: FdtNode): FdtNode? {
-            if (node.name == "cpus" || node.name.startsWith("cpus@") || node.label == "cpus") {
-                return node
-            }
-            for (child in node.children) {
-                val found = search(child)
-                if (found != null) return found
-            }
-            return null
-        }
-        return search(rootNode)
-    }
+class CpuTopologyManager(
+    private val engine: TopologyEngine = TopologyEngine()
+) {
 
     fun extractTopology(rootNode: FdtNode): CpuTopologyState {
         val diagnostics = mutableListOf<String>()
-        val cpusNode = findCpusNode(rootNode)
+        val cores = engine.extractCpuCores(rootNode)
 
-        if (cpusNode == null) {
-            diagnostics.add("No /cpus node found in imported Device Tree.")
-            return CpuTopologyState(emptyList(), 0, false, diagnostics)
+        if (cores.isEmpty()) {
+            diagnostics.add("No /cpus core nodes detected in imported Device Tree.")
+            return CpuTopologyState(emptyList(), 0, false, emptyList(), null, emptyMap(), diagnostics, false, false)
         }
 
-        // Discover CPU core nodes (cpu@... or cpu...)
-        val cpuNodes = cpusNode.children.filter {
-            (it.name.startsWith("cpu@") || (it.name.startsWith("cpu") && it.name != "cpu-map"))
+        val controllerInfo = engine.discoverPerformanceController(rootNode, cores)
+        val syncSupported = controllerInfo != null
+
+        if (syncSupported) {
+            diagnostics.add("[cpufreq] Discovered performance controller '${controllerInfo!!.nodeName}' at ${controllerInfo.fullPath} (phandle 0x${controllerInfo.phandle.toString(16)})")
+            diagnostics.add("[cpufreq] Available CSRAM slots (${controllerInfo.availableSlots.size}): " +
+                    controllerInfo.availableSlots.joinToString { "0x${it.toString(16)}" })
+            if (controllerInfo.cpuhvfsFound) {
+                diagnostics.add("[cpufreq] Discovered cpuhvfs node. Max domain limit: ${controllerInfo.maxDomainsAllowed}")
+            }
+        } else {
+            diagnostics.add("[cpufreq] No performance-controller detected via performance-domains phandle.")
         }
 
-        if (cpuNodes.isEmpty()) {
-            diagnostics.add("Found /cpus container, but no child cpu@ core nodes were detected.")
-            return CpuTopologyState(emptyList(), 0, false, diagnostics)
-        }
+        // Build clusters representation
+        val cpusNode = rootNode.findChild("cpus")
+            ?: rootNode.children.firstOrNull { it.name.startsWith("cpus") || it.label == "cpus" }
+        val cpuMapNode = cpusNode?.findChild("cpu-map")
+            ?: cpusNode?.children?.firstOrNull { it.name == "cpu-map" }
 
-        val coreList = mutableListOf<CpuCoreInfo>()
-
-        for (cpu in cpuNodes) {
-            val regProp = cpu.findProperty("reg")
-            val regAddr = regProp?.asSingleU32() ?: parseRegFromName(cpu.name)
-            val phandle = cpu.getPhandle()
-            val comp = cpu.findProperty("compatible")?.asStringList()?.joinToString() ?: ""
-            coreList.add(
-                CpuCoreInfo(
-                    nodeName = cpu.name,
-                    regAddress = regAddr,
-                    phandle = phandle,
-                    clusterIndex = 0,
-                    compatible = comp
-                )
-            )
-        }
-
-        // Discover cpu-map
-        val cpuMapNode = cpusNode.findChild("cpu-map")
-            ?: cpusNode.children.firstOrNull { it.name == "cpu-map" }
         val clusters = mutableListOf<CpuCluster>()
 
         if (cpuMapNode != null) {
@@ -103,11 +73,22 @@ class CpuTopologyManager {
                 for (coreChild in coreChildNodes) {
                     val cpuProp = coreChild.findProperty("cpu")
                     val refPhandle = cpuProp?.asSingleU32()
-                    val matchedCore = coreList.firstOrNull { it.phandle != null && it.phandle == refPhandle }
-                        ?: coreList.getOrNull(cluster.cores.size + clusters.sumOf { it.cores.size })
+
+                    val matchedCore = cores.firstOrNull { it.phandle != null && it.phandle == refPhandle }
+                        ?: cores.getOrNull(cluster.cores.size + clusters.sumOf { it.cores.size })
 
                     if (matchedCore != null) {
-                        cluster.cores.add(matchedCore.copy(clusterIndex = cIdx))
+                        cluster.cores.add(
+                            CpuCoreInfo(
+                                nodeName = matchedCore.nodeName,
+                                regAddress = matchedCore.regAddress,
+                                phandle = matchedCore.phandle,
+                                clusterIndex = cIdx,
+                                compatible = matchedCore.microarch
+                            )
+                        )
+                    } else {
+                        diagnostics.add("Warning: core node ${coreChild.name} in cluster$cIdx has unresolvable cpu phandle 0x${refPhandle?.toString(16)}")
                     }
                 }
                 clusters.add(cluster)
@@ -115,106 +96,86 @@ class CpuTopologyManager {
         }
 
         if (clusters.isEmpty()) {
-            // Assign all cores to cluster0 if no explicit cpu-map node is present
-            val defaultCluster = CpuCluster(0, "cluster0", coreList.map { it.copy(clusterIndex = 0) }.toMutableList())
+            val defaultCluster = CpuCluster(
+                index = 0,
+                name = "cluster0",
+                cores = cores.map {
+                    CpuCoreInfo(
+                        nodeName = it.nodeName,
+                        regAddress = it.regAddress,
+                        phandle = it.phandle,
+                        clusterIndex = 0,
+                        compatible = it.microarch
+                    )
+                }.toMutableList()
+            )
             clusters.add(defaultCluster)
-            diagnostics.add("No /cpus/cpu-map topology node found. Cores displayed in flat layout.")
+            diagnostics.add("No /cpus/cpu-map topology node found. Cores grouped in single flat layout.")
         }
+
+        val clusterConfigs = clusters.map { c ->
+            ClusterConfig(c.index, c.cores.map { it.nodeName.removePrefix("cpu@").removePrefix("cpu").toIntOrNull() ?: 0 })
+        }
+
+        val assignedSlots = if (controllerInfo != null) {
+            engine.assignDomainSlots(clusterConfigs, cores, controllerInfo)
+        } else {
+            emptyMap()
+        }
+
+        val warnings = engine.generateWarnings(clusterConfigs, cores, controllerInfo)
+        diagnostics.addAll(warnings)
 
         return CpuTopologyState(
             clusters = clusters,
-            totalCores = coreList.size,
-            hasCpuMap = cpuMapNode != null,
-            diagnostics = diagnostics
+            totalCores = cores.size,
+            hasCpuMap = (cpuMapNode != null),
+            cores = cores,
+            controllerInfo = controllerInfo,
+            assignedSlots = assignedSlots,
+            diagnostics = diagnostics,
+            syncCpufreqSupported = syncSupported,
+            syncCpufreqEnabled = syncSupported
         )
     }
 
-    /**
-     * Applies preset topology groupings (e.g. 4+4, 4+2+2, 2+3+3, or custom) to the AST rootNode
-     */
     fun applyPreset(
         rootNode: FdtNode,
-        clusterSizes: List<Int>
+        clusterSizes: List<Int>,
+        syncCpufreq: Boolean = true
     ): Pair<Boolean, String> {
-        val cpusNode = findCpusNode(rootNode)
-            ?: return Pair(false, "Cannot find /cpus node in Device Tree")
+        val cores = engine.extractCpuCores(rootNode)
+        if (cores.isEmpty()) return Pair(false, "No CPU cores found in /cpus node")
 
-        val cpuNodes = cpusNode.children.filter { it.name.startsWith("cpu@") || (it.name.startsWith("cpu") && it.name != "cpu-map") }
-            .sortedBy { it.findProperty("reg")?.asSingleU32() ?: parseRegFromName(it.name) }
+        val plan = engine.createPlanFromSizes(clusterSizes, cores.size).copy(syncCpufreq = syncCpufreq)
+        if (!plan.isValid) return Pair(false, plan.errors.joinToString("; "))
 
-        val totalCores = cpuNodes.size
-        val requestedSum = clusterSizes.sum()
+        val controllerInfo = if (syncCpufreq) engine.discoverPerformanceController(rootNode, cores) else null
+        val warnings = engine.generateWarnings(plan.clusters, cores, controllerInfo)
+        val planWithWarnings = plan.copy(warnings = warnings)
 
-        if (requestedSum != totalCores) {
-            return Pair(false, "Preset core count ($requestedSum) does not match actual CPU cores found ($totalCores)")
-        }
+        val slots = if (controllerInfo != null) engine.assignDomainSlots(plan.clusters, cores, controllerInfo) else emptyMap()
 
-        // Ensure every CPU node has a phandle
-        var maxPhandle = 0x8000L
-        for (node in cpuNodes) {
-            val p = node.getPhandle()
-            if (p != null && p > maxPhandle) maxPhandle = p
-        }
-
-        for (node in cpuNodes) {
-            if (node.getPhandle() == null) {
-                maxPhandle++
-                val buf = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN)
-                buf.putInt(maxPhandle.toInt())
-                node.properties.add(FdtProperty("phandle", buf.array()))
-            }
-        }
-
-        // Reconstruct cpu-map node
-        var cpuMapNode = cpusNode.findChild("cpu-map")
-        if (cpuMapNode == null) {
-            cpuMapNode = FdtNode(name = "cpu-map", fullPath = "${cpusNode.fullPath}/cpu-map")
-            cpusNode.children.add(cpuMapNode)
-        } else {
-            cpuMapNode.children.clear()
-        }
-
-        var coreIdx = 0
-        for (cIdx in clusterSizes.indices) {
-            val count = clusterSizes[cIdx]
-            val clusterNode = FdtNode(
-                name = "cluster$cIdx",
-                fullPath = "${cpuMapNode.fullPath}/cluster$cIdx"
-            )
-            cpuMapNode.children.add(clusterNode)
-
-            for (i in 0 until count) {
-                val targetCpu = cpuNodes[coreIdx]
-                val phandle = targetCpu.getPhandle() ?: 0L
-
-                val coreNode = FdtNode(
-                    name = "core$i",
-                    fullPath = "${clusterNode.fullPath}/core$i"
-                )
-                val phandleBuf = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN)
-                phandleBuf.putInt(phandle.toInt())
-                coreNode.properties.add(FdtProperty("cpu", phandleBuf.array()))
-
-                clusterNode.children.add(coreNode)
-                coreIdx++
-            }
-        }
-
-        val msg = buildString {
-            appendLine("Topology updated to ${clusterSizes.joinToString("+")}:")
-            appendLine("- Reconstructed /cpus/cpu-map with ${clusterSizes.size} clusters")
-            appendLine("- Mapped $totalCores physical cores with valid phandles")
-        }
-
-        return Pair(true, msg)
+        return engine.applyPlanToAst(rootNode, planWithWarnings, cores, controllerInfo, slots)
     }
 
-    private fun parseRegFromName(name: String): Long {
-        val atIdx = name.indexOf('@')
-        if (atIdx != -1) {
-            val hex = name.substring(atIdx + 1)
-            return hex.toLongOrNull(16) ?: 0L
-        }
-        return 0L
+    fun applyCustomPlan(
+        rootNode: FdtNode,
+        clusterConfigs: List<ClusterConfig>,
+        syncCpufreq: Boolean = true
+    ): Pair<Boolean, String> {
+        val cores = engine.extractCpuCores(rootNode)
+        if (cores.isEmpty()) return Pair(false, "No CPU cores found in /cpus node")
+
+        val plan = engine.validatePlan(clusterConfigs, cores.size).copy(syncCpufreq = syncCpufreq)
+        if (!plan.isValid) return Pair(false, plan.errors.joinToString("; "))
+
+        val controllerInfo = if (syncCpufreq) engine.discoverPerformanceController(rootNode, cores) else null
+        val warnings = engine.generateWarnings(plan.clusters, cores, controllerInfo)
+        val planWithWarnings = plan.copy(warnings = warnings)
+
+        val slots = if (controllerInfo != null) engine.assignDomainSlots(plan.clusters, cores, controllerInfo) else emptyMap()
+
+        return engine.applyPlanToAst(rootNode, planWithWarnings, cores, controllerInfo, slots)
     }
 }

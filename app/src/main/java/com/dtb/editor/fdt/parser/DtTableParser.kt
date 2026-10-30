@@ -59,7 +59,8 @@ data class DtTableEntry(
 data class DtTableContainer(
     val header: DtTableHeader,
     val entries: List<DtTableEntry>,
-    val rawBytes: ByteArray
+    val rawBytes: ByteArray,
+    val warnings: List<String> = emptyList()
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -67,6 +68,7 @@ data class DtTableContainer(
         other as DtTableContainer
         if (header != other.header) return false
         if (entries != other.entries) return false
+        if (warnings != other.warnings) return false
         if (!rawBytes.contentEquals(other.rawBytes)) return false
         return true
     }
@@ -74,6 +76,7 @@ data class DtTableContainer(
     override fun hashCode(): Int {
         var result = header.hashCode()
         result = 31 * result + entries.hashCode()
+        result = 31 * result + warnings.hashCode()
         result = 31 * result + rawBytes.contentHashCode()
         return result
     }
@@ -93,19 +96,31 @@ class DtTableParser {
             "Buffer size (${bytes.size} B) is smaller than DT table header size (32 B)"
         }
 
+        val warnings = mutableListOf<String>()
         val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.BIG_ENDIAN)
         val magic = buffer.int.toLong() and 0xFFFFFFFFL
         require(magic == DtTableHeader.DT_TABLE_MAGIC) {
             "Invalid DT table magic: 0x${magic.toString(16)}. Expected 0xd7b7ab1e."
         }
 
-        val totalSize = buffer.int.toLong() and 0xFFFFFFFFL
+        var totalSize = buffer.int.toLong() and 0xFFFFFFFFL
         val headerSize = buffer.int
         val dtEntrySize = buffer.int
         val dtEntryCount = buffer.int
-        val dtEntriesOffset = buffer.int.toLong() and 0xFFFFFFFFL
+        var dtEntriesOffset = buffer.int.toLong() and 0xFFFFFFFFL
         val pageSize = buffer.int.toLong() and 0xFFFFFFFFL
         val version = buffer.int.toLong() and 0xFFFFFFFFL
+
+        // Endianness tolerance check for header fields
+        if (dtEntriesOffset > bytes.size || totalSize > bytes.size.toLong() * 10L) {
+            val totalSizeLE = Integer.reverseBytes(totalSize.toInt()).toLong() and 0xFFFFFFFFL
+            val dtEntriesOffsetLE = Integer.reverseBytes(dtEntriesOffset.toInt()).toLong() and 0xFFFFFFFFL
+            if (dtEntriesOffsetLE in headerSize.toLong()..bytes.size.toLong()) {
+                totalSize = totalSizeLE
+                dtEntriesOffset = dtEntriesOffsetLE
+                warnings.add("[DtTableParser] Detected Little-Endian header encoding (dt_entries_offset=0x${dtEntriesOffset.toString(16)}, total_size=$totalSize B). Auto-corrected to Big-Endian.")
+            }
+        }
 
         require(headerSize >= DtTableHeader.MIN_HEADER_SIZE) {
             "Invalid header_size: $headerSize (expected >= 32)"
@@ -117,7 +132,7 @@ class DtTableParser {
             "Invalid dt_entry_count: $dtEntryCount"
         }
         require(dtEntriesOffset >= headerSize && dtEntriesOffset <= bytes.size) {
-            "Invalid dt_entries_offset: $dtEntriesOffset"
+            "Invalid dt_entries_offset: $dtEntriesOffset (file size ${bytes.size} B)"
         }
 
         val header = DtTableHeader(
@@ -140,10 +155,21 @@ class DtTableParser {
             }
 
             buffer.position(entryOffset)
-            val dtSize = buffer.int.toLong() and 0xFFFFFFFFL
-            val dtOffset = buffer.int.toLong() and 0xFFFFFFFFL
+            var dtSize = buffer.int.toLong() and 0xFFFFFFFFL
+            var dtOffset = buffer.int.toLong() and 0xFFFFFFFFL
             val id = buffer.int.toLong() and 0xFFFFFFFFL
             val rev = buffer.int.toLong() and 0xFFFFFFFFL
+
+            // Endianness tolerance check for entry fields
+            if (dtOffset >= bytes.size || dtOffset + dtSize > bytes.size.toLong() + 4096L) {
+                val dtSizeLE = Integer.reverseBytes(dtSize.toInt()).toLong() and 0xFFFFFFFFL
+                val dtOffsetLE = Integer.reverseBytes(dtOffset.toInt()).toLong() and 0xFFFFFFFFL
+                if (dtOffsetLE in 0 until bytes.size && dtOffsetLE + dtSizeLE <= bytes.size.toLong() + 4096L) {
+                    dtSize = dtSizeLE
+                    dtOffset = dtOffsetLE
+                    warnings.add("[DtTableParser] Entry $i Little-Endian fields detected (dt_offset=0x${dtOffset.toString(16)}, dt_size=$dtSize B). Auto-corrected to Big-Endian.")
+                }
+            }
 
             val custom = mutableListOf<Long>()
             for (c in 0 until 4) {
@@ -153,11 +179,12 @@ class DtTableParser {
             require(dtOffset in 0 until bytes.size) {
                 "Entry $i dt_offset ($dtOffset) is out of buffer bounds (${bytes.size})"
             }
-            require(dtOffset + dtSize <= bytes.size) {
+            require(dtOffset + dtSize <= bytes.size.toLong() + 4096L) {
                 "Entry $i payload (offset $dtOffset, size $dtSize) exceeds buffer size (${bytes.size})"
             }
 
-            val fdtBytes = bytes.copyOfRange(dtOffset.toInt(), (dtOffset + dtSize).toInt())
+            val actualCopySize = dtSize.toInt().coerceAtMost(bytes.size - dtOffset.toInt())
+            val fdtBytes = bytes.copyOfRange(dtOffset.toInt(), dtOffset.toInt() + actualCopySize)
 
             // Verify embedded FDT header magic
             require(fdtBytes.size >= FdtHeader.HEADER_SIZE) {
@@ -185,7 +212,8 @@ class DtTableParser {
         return DtTableContainer(
             header = header,
             entries = entries,
-            rawBytes = bytes
+            rawBytes = bytes,
+            warnings = warnings
         )
     }
 

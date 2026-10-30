@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.dtb.editor.dtc.DtcEngine
 import com.dtb.editor.dtc.DtcEngineImpl
 import com.dtb.editor.fdt.SampleDtbProvider
+import com.dtb.editor.fdt.cpu.ClusterConfig
 import com.dtb.editor.fdt.cpu.CpuTopologyManager
 import com.dtb.editor.fdt.cpu.CpuTopologyState
 import com.dtb.editor.fdt.diff.DiffSummary
@@ -352,17 +353,38 @@ class DtbViewModel(
         }
     }
 
-    fun applyCpuPreset(preset: List<Int>) {
+    fun applyCpuPreset(preset: List<Int>, syncCpufreq: Boolean = true) {
         val current = _workspace.value ?: return
         viewModelScope.launch {
             _isProcessing.value = true
             withContext(Dispatchers.Default) {
                 val parsed = DtsParser().parse(current.sourceText)
-                val (success, msg) = topologyManager.applyPreset(parsed.rootNode, preset)
+                val (success, msg) = topologyManager.applyPreset(parsed.rootNode, preset, syncCpufreq)
                 if (success) {
                     val formattedDts = DtsFormatter().format(parsed.rootNode, parsed.reservations)
                     updateSourceText(formattedDts)
                     _statusMessage.value = msg
+                    _cpuTopology.value = topologyManager.extractTopology(parsed.rootNode)
+                } else {
+                    _statusMessage.value = "Topology Error: $msg"
+                }
+                _isProcessing.value = false
+            }
+        }
+    }
+
+    fun applyCustomTopologyPlan(clusterConfigs: List<ClusterConfig>, syncCpufreq: Boolean = true) {
+        val current = _workspace.value ?: return
+        viewModelScope.launch {
+            _isProcessing.value = true
+            withContext(Dispatchers.Default) {
+                val parsed = DtsParser().parse(current.sourceText)
+                val (success, msg) = topologyManager.applyCustomPlan(parsed.rootNode, clusterConfigs, syncCpufreq)
+                if (success) {
+                    val formattedDts = DtsFormatter().format(parsed.rootNode, parsed.reservations)
+                    updateSourceText(formattedDts)
+                    _statusMessage.value = msg
+                    _cpuTopology.value = topologyManager.extractTopology(parsed.rootNode)
                 } else {
                     _statusMessage.value = "Topology Error: $msg"
                 }
