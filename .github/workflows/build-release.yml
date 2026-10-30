@@ -1,4 +1,4 @@
-name: Build and Release Android App
+name: Build and Release Android APK
 
 on:
   push:
@@ -12,12 +12,6 @@ on:
       - main
       - master
   workflow_dispatch:
-    inputs:
-      build_bundle:
-        description: 'Build Google Play App Bundle (AAB) alongside APK'
-        required: false
-        type: boolean
-        default: true
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -25,7 +19,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build Release APK & Bundle
+    name: Build Release APK
     runs-on: ubuntu-latest
 
     permissions:
@@ -86,12 +80,8 @@ jobs:
       - name: Run Unit Tests
         run: ./gradlew testDebugUnitTest --continue
 
-      - name: Build Release APK
+      - name: Build Optimized Release APK
         run: ./gradlew assembleRelease
-
-      - name: Build Release App Bundle (AAB)
-        if: ${{ github.event_name != 'pull_request' }}
-        run: ./gradlew bundleRelease
 
       - name: Organize Build Outputs & Checksums
         shell: bash
@@ -101,29 +91,17 @@ jobs:
           if [ -f "app/build/outputs/apk/release/app-release.apk" ]; then
             cp app/build/outputs/apk/release/app-release.apk dist/DTBStudio-release.apk
           fi
-          # Copy Release AAB if built
-          if [ -f "app/build/outputs/bundle/release/app-release.aab" ]; then
-            cp app/build/outputs/bundle/release/app-release.aab dist/DTBStudio-release.aab
-          fi
           # Calculate checksums
           cd dist
           sha256sum * > SHA256SUMS.txt || true
           cat SHA256SUMS.txt || true
-          ls -la
+          ls -lh
 
       - name: Upload Release APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: DTBStudio-release-apk
-          path: dist/*.apk
-          retention-days: 30
-
-      - name: Upload Release AAB Artifact
-        if: ${{ github.event_name != 'pull_request' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: DTBStudio-release-aab
-          path: dist/*.aab
+          path: dist/*
           retention-days: 30
 
       - name: Publish GitHub Release (on tag)
