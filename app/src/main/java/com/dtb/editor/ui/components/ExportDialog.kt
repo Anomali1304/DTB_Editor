@@ -8,6 +8,7 @@ import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.IosShare
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -24,6 +25,7 @@ import com.dtb.editor.viewmodel.ExportTargetType
 
 @Composable
 fun ExportDialog(
+    hasDtTableContainer: Boolean,
     onDismiss: () -> Unit,
     onSelectExportType: (ExportTargetType, String, String) -> Unit
 ) {
@@ -33,7 +35,7 @@ fun ExportDialog(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.IosShare, contentDescription = null, tint = IdePrimaryCyan, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Export File", color = TextPrimary, fontSize = 14.sp, fontFamily = FontFamily.Monospace)
+                Text("Export Device Tree File", color = TextPrimary, fontSize = 14.sp, fontFamily = FontFamily.Monospace)
             }
         },
         text = {
@@ -41,13 +43,26 @@ fun ExportDialog(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                if (hasDtTableContainer) {
+                    ExportOptionItem(
+                        icon = Icons.Default.Layers,
+                        iconTint = IdeSecondaryGreen,
+                        title = "Rebuilt Android DT Table (.dtb)",
+                        description = "Rebuilds 0xd7b7ab1e container image with updated entry payload & recalculated total_size",
+                        onClick = {
+                            onSelectExportType(ExportTargetType.REBUILT_DT_TABLE, "application/octet-stream", "rebuilt_dt_table.dtb")
+                            onDismiss()
+                        }
+                    )
+                }
+
                 ExportOptionItem(
                     icon = Icons.Default.Save,
-                    iconTint = IdeSecondaryGreen,
-                    title = "Compiled Binary DTB (.dtb)",
-                    description = "Compile current DTS source to FDT binary",
+                    iconTint = IdePrimaryCyan,
+                    title = "Raw Compiled FDT (.dtb)",
+                    description = "Exports standalone 0xd00dfeed binary DTB payload for current entry",
                     onClick = {
-                        onSelectExportType(ExportTargetType.COMPILED_DTB, "application/octet-stream", "compiled_device_tree.dtb")
+                        onSelectExportType(ExportTargetType.RAW_COMPILED_DTB, "application/octet-stream", "compiled_entry.dtb")
                         onDismiss()
                     }
                 )
@@ -66,8 +81,8 @@ fun ExportDialog(
                 ExportOptionItem(
                     icon = Icons.Default.History,
                     iconTint = IdeWarningAmber,
-                    title = "Original Backup Binary (.dtb)",
-                    description = "Export untouched original imported binary",
+                    title = "Original Backup Image (.dtb)",
+                    description = "Export untouched original imported binary file",
                     onClick = {
                         onSelectExportType(ExportTargetType.ORIGINAL_DTB, "application/octet-stream", "original_backup.dtb")
                         onDismiss()

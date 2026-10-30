@@ -188,6 +188,7 @@ data class DtbProject(
 enum class DtbFileType(val extension: String, val displayName: String) {
     DTB("dtb", "Device Tree Blob (.dtb)"),
     DTBO("dtbo", "Device Tree Overlay (.dtbo)"),
+    DT_TABLE("dtb", "Android DT Table Container (.dtb)"),
     DTS("dts", "Device Tree Source (.dts)"),
     UNKNOWN("bin", "Binary / Unknown")
 }

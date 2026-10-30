@@ -186,6 +186,51 @@ fun MainWorkstationScreen(
                         }
                     }
 
+                    // Android DT Table Entry Switcher Bar (if imported file is a DT Table image)
+                    if (workspace?.dtTableContainer != null) {
+                        val container = workspace!!.dtTableContainer!!
+                        val selectedIndex = workspace!!.selectedDtEntryIndex
+
+                        HorizontalDivider(color = IdeBorder)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(IdeSurface)
+                                .horizontalScroll(rememberScrollState())
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "DT TABLE ENTRIES (${container.entries.size}):",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = IdePrimaryCyan,
+                                fontWeight = FontWeight.Bold
+                            )
+
+                            for (entry in container.entries) {
+                                val isSelected = entry.index == selectedIndex
+                                Surface(
+                                    shape = RoundedCornerShape(2.dp),
+                                    color = if (isSelected) IdePrimaryCyan else IdeBorder.copy(alpha = 0.5f),
+                                    modifier = Modifier.clickable { viewModel.selectDtTableEntry(entry.index) }
+                                ) {
+                                    Text(
+                                        text = "Entry ${entry.index} (ID: 0x${entry.id.toString(16)}, ${entry.dtSize} B)",
+                                        color = if (isSelected) IdeBackground else TextPrimary,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontSize = 10.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     HorizontalDivider(color = IdeBorder)
 
                     // Scrollable Responsive Navigation Tabs
@@ -274,7 +319,6 @@ fun MainWorkstationScreen(
                 .padding(innerPadding)
         ) {
             if (workspace == null) {
-                // Functional Empty State with explicit file operations
                 EmptyWorkspaceView(
                     onOpenDts = { importLauncher.launch(arrayOf("*/*")) },
                     onOpenDtb = { importLauncher.launch(arrayOf("*/*")) },
@@ -299,6 +343,7 @@ fun MainWorkstationScreen(
 
     if (showExportDialog) {
         ExportDialog(
+            hasDtTableContainer = workspace?.dtTableContainer != null,
             onDismiss = { showExportDialog = false },
             onSelectExportType = { type, mime, suggestedName ->
                 pendingExportType = type
@@ -375,7 +420,7 @@ private fun EmptyWorkspaceView(
                 ) {
                     Icon(Icons.Default.FolderOpen, contentDescription = null, tint = IdeSecondaryGreen, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Decompile & Open DTB (.dtb)", fontSize = 12.sp, color = TextPrimary)
+                    Text("Decompile & Open DTB / DT Table (.dtb)", fontSize = 12.sp, color = TextPrimary)
                 }
 
                 OutlinedButton(
