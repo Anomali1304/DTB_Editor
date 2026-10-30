@@ -8,7 +8,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Article
@@ -58,7 +60,7 @@ fun MainWorkstationScreen(
     var pendingExportType by remember { mutableStateOf<ExportTargetType?>(null) }
     var exportMimeType by remember { mutableStateOf("text/plain") }
 
-    // SAF Import Launcher
+    // SAF Import Launchers
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -80,11 +82,13 @@ fun MainWorkstationScreen(
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
-            // Workstation Top Bar
+            // Workstation Top Bar with Status Bar Inset Padding
             Surface(
                 color = IdeSurfaceHeader,
                 tonalElevation = 2.dp,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
             ) {
                 Column {
                     Row(
@@ -94,7 +98,7 @@ fun MainWorkstationScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        // Title / Active File Indicator
+                        // App Title / File Name
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 text = "DTB Studio",
@@ -159,15 +163,6 @@ fun MainWorkstationScreen(
                                 Text("Open", fontSize = 11.sp, color = TextPrimary)
                             }
 
-                            OutlinedButton(
-                                onClick = { viewModel.loadSampleFile() },
-                                shape = RoundedCornerShape(4.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                modifier = Modifier.height(28.dp)
-                            ) {
-                                Text("Sample", fontSize = 11.sp, color = TextSecondary)
-                            }
-
                             if (workspace != null) {
                                 Button(
                                     onClick = { viewModel.saveWorkspace() },
@@ -193,11 +188,12 @@ fun MainWorkstationScreen(
 
                     HorizontalDivider(color = IdeBorder)
 
-                    // Workstation Navigation Tabs
+                    // Scrollable Responsive Navigation Tabs
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .background(IdeSurface)
+                            .horizontalScroll(rememberScrollState())
                             .padding(horizontal = 4.dp, vertical = 2.dp),
                         horizontalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
@@ -224,11 +220,13 @@ fun MainWorkstationScreen(
             }
         },
         bottomBar = {
-            // Workstation Status Bar
+            // Workstation Status Bar with Navigation Bar Inset Padding
             Surface(
                 color = IdeSurfaceHeader,
                 tonalElevation = 2.dp,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
             ) {
                 Row(
                     modifier = Modifier
@@ -275,15 +273,25 @@ fun MainWorkstationScreen(
                 .background(IdeBackground)
                 .padding(innerPadding)
         ) {
-            when (activeTab) {
-                WorkspaceTab.SOURCE -> EditorScreen(viewModel = viewModel)
-                WorkspaceTab.TREE -> ExplorerScreen(viewModel = viewModel)
-                WorkspaceTab.BINARY -> BinaryView(workspace = workspace)
-                WorkspaceTab.TOPOLOGY -> CpuTopologyScreen(viewModel = viewModel)
-                WorkspaceTab.COMPARE -> CompareScreen(viewModel = viewModel)
-                WorkspaceTab.DIAGNOSTICS -> {
-                    val logs by viewModel.diagnosticsLog.collectAsState()
-                    DiagnosticsView(diagnostics = logs)
+            if (workspace == null) {
+                // Functional Empty State with explicit file operations
+                EmptyWorkspaceView(
+                    onOpenDts = { importLauncher.launch(arrayOf("*/*")) },
+                    onOpenDtb = { importLauncher.launch(arrayOf("*/*")) },
+                    onOpenDtbo = { importLauncher.launch(arrayOf("*/*")) },
+                    onLoadSample = { viewModel.loadSampleFile() }
+                )
+            } else {
+                when (activeTab) {
+                    WorkspaceTab.SOURCE -> EditorScreen(viewModel = viewModel)
+                    WorkspaceTab.TREE -> ExplorerScreen(viewModel = viewModel)
+                    WorkspaceTab.BINARY -> BinaryView(workspace = workspace)
+                    WorkspaceTab.TOPOLOGY -> CpuTopologyScreen(viewModel = viewModel)
+                    WorkspaceTab.COMPARE -> CompareScreen(viewModel = viewModel)
+                    WorkspaceTab.DIAGNOSTICS -> {
+                        val logs by viewModel.diagnosticsLog.collectAsState()
+                        DiagnosticsView(diagnostics = logs)
+                    }
                 }
             }
         }
@@ -298,6 +306,100 @@ fun MainWorkstationScreen(
                 exportLauncher.launch(suggestedName)
             }
         )
+    }
+}
+
+@Composable
+private fun EmptyWorkspaceView(
+    onOpenDts: () -> Unit,
+    onOpenDtb: () -> Unit,
+    onOpenDtbo: () -> Unit,
+    onLoadSample: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(IdeBackground)
+            .padding(16.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.widthIn(max = 380.dp)
+        ) {
+            Icon(
+                Icons.Default.Terminal,
+                contentDescription = null,
+                tint = IdePrimaryCyan,
+                modifier = Modifier.size(40.dp)
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Text(
+                text = "DTB Studio Workstation",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary,
+                fontFamily = FontFamily.Monospace
+            )
+
+            Text(
+                text = "Select an operation to load or inspect a Device Tree file:",
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary,
+                fontSize = 11.sp
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // File Operations Buttons
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onOpenDts,
+                    shape = RoundedCornerShape(4.dp),
+                    modifier = Modifier.fillMaxWidth().height(36.dp)
+                ) {
+                    Icon(Icons.Default.Code, contentDescription = null, tint = IdePrimaryCyan, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Open DTS Source (.dts)", fontSize = 12.sp, color = TextPrimary)
+                }
+
+                OutlinedButton(
+                    onClick = onOpenDtb,
+                    shape = RoundedCornerShape(4.dp),
+                    modifier = Modifier.fillMaxWidth().height(36.dp)
+                ) {
+                    Icon(Icons.Default.FolderOpen, contentDescription = null, tint = IdeSecondaryGreen, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Decompile & Open DTB (.dtb)", fontSize = 12.sp, color = TextPrimary)
+                }
+
+                OutlinedButton(
+                    onClick = onOpenDtbo,
+                    shape = RoundedCornerShape(4.dp),
+                    modifier = Modifier.fillMaxWidth().height(36.dp)
+                ) {
+                    Icon(Icons.Default.Hexagon, contentDescription = null, tint = IdeWarningAmber, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Decompile & Open DTBO Overlay (.dtbo)", fontSize = 12.sp, color = TextPrimary)
+                }
+
+                Button(
+                    onClick = onLoadSample,
+                    shape = RoundedCornerShape(4.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = IdeSurfaceHeader),
+                    modifier = Modifier.fillMaxWidth().height(36.dp)
+                ) {
+                    Icon(Icons.Default.Science, contentDescription = null, tint = IdePrimaryCyan, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Load Sample Qualcomm DTB", fontSize = 12.sp, color = TextPrimary)
+                }
+            }
+        }
     }
 }
 

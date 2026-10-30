@@ -16,15 +16,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dtb.editor.ui.theme.*
-import com.dtb.editor.viewmodel.ActiveWorkspace
 import com.dtb.editor.viewmodel.DtbViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditorScreen(
     viewModel: DtbViewModel
@@ -36,27 +35,21 @@ fun EditorScreen(
     var findText by remember { mutableStateOf("") }
     var replaceText by remember { mutableStateOf("") }
 
-    if (workspace == null) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(IdeBackground),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Default.Code, contentDescription = null, tint = TextMuted, modifier = Modifier.size(36.dp))
-                Spacer(modifier = Modifier.height(8.dp))
-                Text("No Device Tree File Open", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
-                Spacer(modifier = Modifier.height(4.dp))
-                Text("Import a .dts or .dtb file to begin editing.", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
-            }
-        }
-        return
-    }
+    if (workspace == null) return
 
     val currentWs = workspace!!
-    var textFieldValue by remember(currentWs.sourceText) {
-        mutableStateOf(TextFieldValue(currentWs.sourceText))
+
+    // Local editor text state - sync with workspace when document instance changes
+    var textFieldValue by remember(currentWs.fileName) {
+        mutableStateOf(TextFieldValue(currentWs.sourceText, selection = TextRange(0)))
+    }
+
+    // Keep textFieldValue in sync if external actions (undo/redo/revert/sample) update sourceText
+    LaunchedEffect(currentWs.sourceText) {
+        if (textFieldValue.text != currentWs.sourceText) {
+            val cursor = textFieldValue.selection.start.coerceAtMost(currentWs.sourceText.length)
+            textFieldValue = TextFieldValue(currentWs.sourceText, selection = TextRange(cursor))
+        }
     }
 
     Column(
@@ -117,7 +110,7 @@ fun EditorScreen(
                     }
                 }
 
-                // Find & Replace Drawer
+                // Find & Replace Bar
                 if (showFindReplace) {
                     HorizontalDivider(color = IdeBorder)
                     Row(
@@ -149,7 +142,7 @@ fun EditorScreen(
                             onClick = {
                                 if (findText.isNotEmpty()) {
                                     val newText = textFieldValue.text.replace(findText, replaceText)
-                                    textFieldValue = TextFieldValue(newText)
+                                    textFieldValue = TextFieldValue(newText, selection = TextRange(0))
                                     viewModel.updateSourceText(newText)
                                 }
                             },
@@ -166,9 +159,10 @@ fun EditorScreen(
 
         HorizontalDivider(color = IdeBorder)
 
-        // Code Editor Area with Line Numbers
-        val lines = remember(textFieldValue.text) { textFieldValue.text.lines() }
-        val lineCount = lines.size
+        // Code Editor Area with Synchronized Line Numbers
+        val lineCount = remember(textFieldValue.text) {
+            textFieldValue.text.count { it == '\n' } + 1
+        }
         val verticalScrollState = rememberScrollState()
 
         Box(
@@ -202,7 +196,7 @@ fun EditorScreen(
 
                 VerticalDivider(color = IdeBorder, modifier = Modifier.width(1.dp))
 
-                // Editable Code Field
+                // Editable DTS Code Field
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -222,7 +216,9 @@ fun EditorScreen(
                             color = TextPrimary
                         ),
                         cursorBrush = SolidColor(IdePrimaryCyan),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .defaultMinSize(minHeight = 400.dp)
                     )
                 }
             }
