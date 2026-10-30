@@ -12,6 +12,8 @@ import com.dtb.editor.fdt.cpu.CpuTopologyManager
 import com.dtb.editor.fdt.cpu.CpuTopologyState
 import com.dtb.editor.fdt.diff.DiffSummary
 import com.dtb.editor.fdt.diff.DtsDiffEngine
+import com.dtb.editor.fdt.diff.TreeComparator
+import com.dtb.editor.fdt.diff.TreeComparisonResult
 import com.dtb.editor.fdt.model.CompilationOutput
 import com.dtb.editor.fdt.model.DtbFileType
 import com.dtb.editor.fdt.model.FdtNode
@@ -64,7 +66,8 @@ class DtbViewModel(
     private val dtcEngine: DtcEngine = DtcEngineImpl(),
     private val topologyManager: CpuTopologyManager = CpuTopologyManager(),
     private val diffEngine: DtsDiffEngine = DtsDiffEngine(),
-    private val dtTableParser: DtTableParser = DtTableParser()
+    private val dtTableParser: DtTableParser = DtTableParser(),
+    private val treeComparator: TreeComparator = TreeComparator()
 ) : ViewModel() {
 
     private val _workspace = MutableStateFlow<ActiveWorkspace?>(null)
@@ -149,14 +152,13 @@ class DtbViewModel(
                         ?: throw Exception("Cannot open file stream for: $uri")
 
                     val bytes = inputStream.use { it.readBytes() }
-
                     val logs = mutableListOf<String>()
 
                     val ws = if (dtTableParser.isDtTable(bytes)) {
-                        // 1. Android DT Table Container (magic 0xd7b7ab1e)
+                        // 1. Android DT Table Container Image (0xd7b7ab1e)
                         val container = dtTableParser.parse(bytes)
                         val header = container.header
-                        logs.add("[Android DT Table] Detected DT Table Image (${bytes.size} B)")
+                        logs.add("[Android DT Table] Loaded DT Table Image (${bytes.size} B)")
                         logs.add("[Header] TotalSize=${header.totalSize}, Entries=${header.dtEntryCount}, PageSize=${header.pageSize}, Version=${header.version}")
 
                         for (e in container.entries) {
@@ -180,7 +182,7 @@ class DtbViewModel(
                             selectedDtEntryIndex = 0
                         )
                     } else if (bytes.size >= 4 && isDtbMagic(bytes)) {
-                        // 2. Raw FDT Binary (magic 0xd00dfeed)
+                        // 2. Raw FDT Binary (0xd00dfeed)
                         val fileType = if (fileName.endsWith(".dtbo", ignoreCase = true)) DtbFileType.DTBO else DtbFileType.DTB
                         val decompileRes = dtcEngine.decompileBytes(bytes).getOrThrow()
                         logs.add(decompileRes.log)
@@ -321,7 +323,23 @@ class DtbViewModel(
             withContext(Dispatchers.Default) {
                 val output = dtcEngine.compileDtsText(current.sourceText)
                 _compilerOutput.value = output
-                _diagnosticsLog.value = listOf(output.log)
+
+                val logs = mutableListOf<String>()
+                logs.add(output.log)
+
+                if (output.success && output.compiledBytes != null) {
+                    // Perform roundtrip structural verification comparison
+                    try {
+                        val origAst = DtsParser().parse(current.originalSourceText).rootNode
+                        val rebuiltAst = FdtBinaryParser().parse(output.compiledBytes).rootNode
+                        val verification = treeComparator.compareTrees(origAst, rebuiltAst)
+                        logs.add(verification.summaryReport())
+                    } catch (e: Exception) {
+                        logs.add("[Verification Error] ${e.message}")
+                    }
+                }
+
+                _diagnosticsLog.value = logs
                 _isProcessing.value = false
 
                 if (output.success) {
@@ -366,7 +384,7 @@ class DtbViewModel(
             withContext(Dispatchers.IO) {
                 try {
                     val stream = context.contentResolver.openOutputStream(targetUri)
-                        ?: throw Exception("Cannot open output stream for: $targetUri")
+                        ?: throw Exception("Cannot open stream for: $targetUri")
 
                     stream.use { out ->
                         when (exportType) {
