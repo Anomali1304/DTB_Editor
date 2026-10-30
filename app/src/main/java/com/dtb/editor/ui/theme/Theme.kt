@@ -6,29 +6,26 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
 private val DarkColorScheme = darkColorScheme(
-    primary = TerminalCyan,
+    primary = IdePrimaryCyan,
     onPrimary = Color.Black,
-    primaryContainer = Color(0xFF004D5A),
-    onPrimaryContainer = Color(0xFF80F0FF),
+    primaryContainer = Color(0xFF1E3A5F),
+    onPrimaryContainer = IdePrimaryCyan,
 
-    secondary = TerminalGreen,
+    secondary = IdeSecondaryGreen,
     onSecondary = Color.Black,
-    secondaryContainer = Color(0xFF004D28),
-    onSecondaryContainer = Color(0xFF80FFAE),
 
-    tertiary = TerminalOrange,
-    onTertiary = Color.Black,
-
-    background = DarkBackground,
+    background = IdeBackground,
     onBackground = TextPrimary,
 
-    surface = DarkSurface,
+    surface = IdeSurface,
     onSurface = TextPrimary,
 
-    surfaceVariant = DarkSurfaceVariant,
+    surfaceVariant = IdeSurfaceHeader,
     onSurfaceVariant = TextSecondary,
 
-    error = TerminalRed,
+    outline = IdeBorder,
+
+    error = IdeErrorRed,
     onError = Color.Black
 )
 

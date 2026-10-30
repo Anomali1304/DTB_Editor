@@ -6,12 +6,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -25,25 +25,21 @@ import com.dtb.editor.viewmodel.DtbViewModel
 fun CpuTopologyScreen(
     viewModel: DtbViewModel
 ) {
-    val project by viewModel.project.collectAsState()
+    val workspace by viewModel.workspace.collectAsState()
     val topology by viewModel.cpuTopology.collectAsState()
-    val isProcessing by viewModel.isProcessing.collectAsState()
+    var showPresetConfirm by remember { mutableStateOf<List<Int>?>(null) }
 
-    var showApplyDialog by remember { mutableStateOf<List<Int>?>(null) }
-
-    if (project == null || topology == null) {
+    if (workspace == null || topology == null) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(DarkBackground),
+                .background(IdeBackground),
             contentAlignment = Alignment.Center
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Default.Memory, contentDescription = null, tint = TextTertiary, modifier = Modifier.size(56.dp))
-                Spacer(modifier = Modifier.height(12.dp))
-                Text("No Device Tree Loaded", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
-                Spacer(modifier = Modifier.height(6.dp))
-                Text("Import a DTB to inspect CPU topology & clusters.", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                Icon(Icons.Default.Memory, contentDescription = null, tint = TextMuted, modifier = Modifier.size(36.dp))
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("No Device Tree Open", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
             }
         }
         return
@@ -51,326 +47,224 @@ fun CpuTopologyScreen(
 
     val top = topology!!
 
-    LazyColumn(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(DarkBackground)
-            .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 16.dp, bottom = 96.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .background(IdeBackground)
     ) {
-        // 1. Overview Card
-        item {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth()
+        // Topology Header Bar
+        Surface(
+            color = IdeSurfaceHeader,
+            tonalElevation = 1.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.padding(18.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Memory, contentDescription = null, tint = IdePrimaryCyan, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "CPU CLUSTER TOPOLOGY (${top.totalCores} CORES, ${top.clusters.size} CLUSTERS)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = IdePrimaryCyan,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(2.dp),
+                    color = if (top.hasCpuMap) IdeSecondaryGreen.copy(alpha = 0.2f) else IdeWarningAmber.copy(alpha = 0.2f)
+                ) {
+                    Text(
+                        text = if (top.hasCpuMap) "CPU-MAP VALID" else "NO CPU-MAP",
+                        color = if (top.hasCpuMap) IdeSecondaryGreen else IdeWarningAmber,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+        }
+
+        HorizontalDivider(color = IdeBorder)
+
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp),
+            contentPadding = PaddingValues(vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // Hardware vs Scheduler Notice
+            item {
+                Surface(
+                    color = IdeSurface,
+                    shape = RoundedCornerShape(4.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(8.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Icon(Icons.Default.WarningAmber, contentDescription = null, tint = IdeWarningAmber, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Note: /cpus/cpu-map updates Linux kernel scheduler CPU affinity. It does not alter hardware clock domains, regulators, or CPUFreq OPP tables.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextSecondary,
+                            fontSize = 10.sp,
+                            lineHeight = 14.sp
+                        )
+                    }
+                }
+            }
+
+            // Diagnostics messages
+            if (top.diagnostics.isNotEmpty()) {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        for (diag in top.diagnostics) {
+                            Text(
+                                text = "• $diag",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = IdeWarningAmber,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Topology Preset Actions (If 8 cores detected)
+            if (top.totalCores == 8) {
+                item {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Column {
-                            Text(
-                                text = "CPU Cluster Topology",
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = TerminalCyan
-                            )
-                            Text(
-                                text = "Discovered ${top.totalCores} physical cores in ${top.clusters.size} clusters",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary
-                            )
-                        }
-
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (top.hasCpuMap) TerminalGreen.copy(alpha = 0.15f) else TerminalOrange.copy(alpha = 0.15f)
-                        ) {
-                            Text(
-                                text = if (top.hasCpuMap) "CPU-MAP ACTIVE" else "NO CPU-MAP",
-                                color = if (top.hasCpuMap) TerminalGreen else TerminalOrange,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
+                        PresetButton("4+4", listOf(4, 4)) { showPresetConfirm = it }
+                        PresetButton("4+2+2", listOf(4, 2, 2)) { showPresetConfirm = it }
+                        PresetButton("2+3+3", listOf(2, 3, 3)) { showPresetConfirm = it }
+                        PresetButton("4+3+1", listOf(4, 3, 1)) { showPresetConfirm = it }
                     }
                 }
             }
-        }
 
-        // 2. Hardware / Kernel Safety Notice (MANDATORY per spec)
-        item {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = DarkSurfaceVariant),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier.padding(14.dp),
-                    verticalAlignment = Alignment.Top
-                ) {
-                    Icon(
-                        Icons.Default.WarningAmber,
-                        contentDescription = "Safety Warning",
-                        tint = TerminalOrange,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            text = "CPU TOPOLOGY vs CPUFREQ DVFS",
-                            fontWeight = FontWeight.Bold,
-                            color = TerminalOrange,
-                            style = MaterialTheme.typography.labelMedium
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Reconfiguring /cpus/cpu-map updates Linux kernel scheduler load-balancing groups. It does NOT automatically create CPUFreq policies or OPP DVFS clock domains. Hardware frequencies, voltages, and register addresses are strictly preserved from verified DTB nodes.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextPrimary,
-                            lineHeight = 18.sp
-                        )
-                    }
-                }
+            // Cluster Cards
+            items(top.clusters) { cluster ->
+                ClusterBox(cluster = cluster)
             }
-        }
-
-        // 3. Topology Presets
-        item {
-            Text(
-                text = "TOPOLOGY PRESETS (8 CORES)",
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-                color = TextSecondary,
-                letterSpacing = 1.sp
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                PresetChip(label = "4 + 4", description = "Dual cluster", onClick = { showApplyDialog = listOf(4, 4) }, modifier = Modifier.weight(1f))
-                PresetChip(label = "4 + 2 + 2", description = "Tri-cluster", onClick = { showApplyDialog = listOf(4, 2, 2) }, modifier = Modifier.weight(1f))
-                PresetChip(label = "2 + 3 + 3", description = "Tri-cluster", onClick = { showApplyDialog = listOf(2, 3, 3) }, modifier = Modifier.weight(1f))
-                PresetChip(label = "4 + 3 + 1", description = "Prime core", onClick = { showApplyDialog = listOf(4, 3, 1) }, modifier = Modifier.weight(1f))
-            }
-        }
-
-        // 4. Clusters & Cores Visualization
-        items(top.clusters) { cluster ->
-            ClusterCard(cluster = cluster)
         }
     }
 
-    // Confirmation Dialog before modifying DTS
-    if (showApplyDialog != null) {
-        val preset = showApplyDialog!!
+    if (showPresetConfirm != null) {
+        val preset = showPresetConfirm!!
         AlertDialog(
-            onDismissRequest = { showApplyDialog = null },
-            title = { Text("Apply Topology Preset: ${preset.joinToString("+")}?", color = TextPrimary) },
+            onDismissRequest = { showPresetConfirm = null },
+            title = { Text("Reconstruct /cpus/cpu-map to ${preset.joinToString("+")}?", fontSize = 13.sp, color = TextPrimary) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "This will update the /cpus/cpu-map node with ${preset.size} clusters (${preset.joinToString("+")}) and recalculate core phandles.",
-                        color = TextPrimary,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Text(
-                        text = "• Original phandles and hardware registers are verified and preserved.\n• Unrelated DTS properties remain untouched.",
-                        color = TextSecondary,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
+                Text(
+                    text = "This will update the cpu-map node in DTS to reflect cluster sizes ${preset.joinToString("+")}. Hardware phandles will be verified and resolved.",
+                    fontSize = 11.sp,
+                    color = TextSecondary
+                )
             },
             confirmButton = {
                 Button(
                     onClick = {
                         viewModel.applyCpuPreset(preset)
-                        showApplyDialog = null
+                        showPresetConfirm = null
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = TerminalCyan)
+                    colors = ButtonDefaults.buttonColors(containerColor = IdePrimaryCyan),
+                    shape = RoundedCornerShape(4.dp)
                 ) {
-                    Text("Apply Changes", color = DarkBackground, fontWeight = FontWeight.Bold)
+                    Text("Apply", color = IdeBackground, fontSize = 11.sp)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showApplyDialog = null }) {
-                    Text("Cancel", color = TextSecondary)
+                TextButton(onClick = { showPresetConfirm = null }) {
+                    Text("Cancel", color = TextSecondary, fontSize = 11.sp)
                 }
             },
-            containerColor = DarkSurface
+            containerColor = IdeSurface
         )
     }
 }
 
 @Composable
-private fun PresetChip(
-    label: String,
-    description: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = DarkSurface),
-        shape = RoundedCornerShape(10.dp),
-        onClick = onClick,
-        modifier = modifier
+private fun RowScope.PresetButton(label: String, preset: List<Int>, onClick: (List<Int>) -> Unit) {
+    OutlinedButton(
+        onClick = { onClick(preset) },
+        modifier = Modifier.weight(1f).height(32.dp),
+        shape = RoundedCornerShape(4.dp),
+        contentPadding = PaddingValues(2.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = TerminalCyan,
-                fontFamily = FontFamily.Monospace
-            )
-            Text(
-                text = description,
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary,
-                fontSize = 10.sp
-            )
-        }
+        Text(label, fontSize = 11.sp, color = IdePrimaryCyan, fontFamily = FontFamily.Monospace)
     }
 }
 
 @Composable
-private fun ClusterCard(cluster: CpuCluster) {
-    val clusterColor = when (cluster.index) {
-        0 -> TerminalGreen
-        1 -> TerminalCyan
-        2 -> TerminalOrange
-        else -> TerminalPurple
-    }
-
-    Card(
-        colors = CardDefaults.cardColors(containerColor = DarkSurface),
-        shape = RoundedCornerShape(14.dp),
+private fun ClusterBox(cluster: CpuCluster) {
+    Surface(
+        color = IdeSurface,
+        shape = RoundedCornerShape(4.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(10.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "${cluster.name.uppercase()} (${cluster.cores.size} CORES)",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = IdeSecondaryGreen,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                for (core in cluster.cores) {
                     Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = clusterColor.copy(alpha = 0.2f),
-                        modifier = Modifier.size(28.dp)
+                        color = IdeBackground,
+                        shape = RoundedCornerShape(2.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Text(
-                                text = "${cluster.index}",
-                                color = clusterColor,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace
+                                text = core.nodeName,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = "reg=0x${core.regAddress.toString(16)}" + if (core.phandle != null) " (phandle=0x${core.phandle.toString(16)})" else "",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 10.sp,
+                                color = TextMuted
                             )
                         }
                     }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        text = cluster.name.uppercase(),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary
-                    )
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = DarkSurfaceVariant
-                ) {
-                    Text(
-                        text = "${cluster.cores.size} Cores",
-                        color = TextSecondary,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Cores in this cluster
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (core in cluster.cores) {
-                    CoreRow(core = core, accentColor = clusterColor)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CoreRow(core: CpuCoreInfo, accentColor: Color) {
-    Surface(
-        shape = RoundedCornerShape(8.dp),
-        color = DarkBackground,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Default.Memory,
-                    contentDescription = null,
-                    tint = accentColor,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(10.dp))
-                Column {
-                    Text(
-                        text = core.nodeName,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary,
-                        fontFamily = FontFamily.Monospace
-                    )
-                    if (core.compatible.isNotEmpty()) {
-                        Text(
-                            text = core.compatible,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = TextSecondary,
-                            fontSize = 10.sp
-                        )
-                    }
-                }
-            }
-
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    text = "reg: 0x${core.regAddress.toString(16)}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TerminalCyan,
-                    fontFamily = FontFamily.Monospace
-                )
-                if (core.phandle != null) {
-                    Text(
-                        text = "phandle: 0x${core.phandle.toString(16)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 10.sp
-                    )
                 }
             }
         }

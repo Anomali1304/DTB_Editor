@@ -23,21 +23,53 @@ data class CpuTopologyState(
     val clusters: List<CpuCluster>,
     val totalCores: Int,
     val hasCpuMap: Boolean,
-    val warnings: List<String>
+    val diagnostics: List<String>
 )
 
 class CpuTopologyManager {
 
+    /**
+     * Locate the /cpus node anywhere in the tree (handles root /cpus, labeled cpus:, and paths)
+     */
+    fun findCpusNode(rootNode: FdtNode): FdtNode? {
+        // Direct child
+        val direct = rootNode.findChild("cpus")
+            ?: rootNode.children.firstOrNull { it.name.startsWith("cpus") || it.label == "cpus" }
+        if (direct != null) return direct
+
+        // Recursive search for any node named cpus or label cpus
+        fun search(node: FdtNode): FdtNode? {
+            if (node.name == "cpus" || node.name.startsWith("cpus@") || node.label == "cpus") {
+                return node
+            }
+            for (child in node.children) {
+                val found = search(child)
+                if (found != null) return found
+            }
+            return null
+        }
+        return search(rootNode)
+    }
+
     fun extractTopology(rootNode: FdtNode): CpuTopologyState {
-        val warnings = mutableListOf<String>()
-        val cpusNode = rootNode.findChild("cpus") ?: rootNode.children.firstOrNull { it.name.startsWith("cpus") }
+        val diagnostics = mutableListOf<String>()
+        val cpusNode = findCpusNode(rootNode)
 
         if (cpusNode == null) {
-            return CpuTopologyState(emptyList(), 0, false, listOf("No /cpus node found in device tree"))
+            diagnostics.add("No /cpus node found in imported Device Tree.")
+            return CpuTopologyState(emptyList(), 0, false, diagnostics)
         }
 
-        // 1. Discover all CPU core nodes (cpu@...)
-        val cpuNodes = cpusNode.children.filter { it.name.startsWith("cpu@") || (it.name.startsWith("cpu") && it.name != "cpu-map") }
+        // Discover CPU core nodes (cpu@... or cpu...)
+        val cpuNodes = cpusNode.children.filter {
+            (it.name.startsWith("cpu@") || (it.name.startsWith("cpu") && it.name != "cpu-map"))
+        }
+
+        if (cpuNodes.isEmpty()) {
+            diagnostics.add("Found /cpus container, but no child cpu@ core nodes were detected.")
+            return CpuTopologyState(emptyList(), 0, false, diagnostics)
+        }
+
         val coreList = mutableListOf<CpuCoreInfo>()
 
         for (cpu in cpuNodes) {
@@ -56,8 +88,9 @@ class CpuTopologyManager {
             )
         }
 
-        // 2. Discover cpu-map node if present
+        // Discover cpu-map
         val cpuMapNode = cpusNode.findChild("cpu-map")
+            ?: cpusNode.children.firstOrNull { it.name == "cpu-map" }
         val clusters = mutableListOf<CpuCluster>()
 
         if (cpuMapNode != null) {
@@ -66,7 +99,6 @@ class CpuTopologyManager {
                 val clusterNode = clusterNodes[cIdx]
                 val cluster = CpuCluster(index = cIdx, name = clusterNode.name)
 
-                // Search for core nodes inside cluster
                 val coreChildNodes = clusterNode.children.filter { it.name.startsWith("core") }
                 for (coreChild in coreChildNodes) {
                     val cpuProp = coreChild.findProperty("cpu")
@@ -82,26 +114,18 @@ class CpuTopologyManager {
             }
         }
 
-        // If no cpu-map or cluster assignment was found, default assign based on available cores
-        if (clusters.isEmpty() || clusters.sumOf { it.cores.size } < coreList.size) {
-            clusters.clear()
-            val total = coreList.size
-            if (total == 8) {
-                // Default 4+4
-                val c0 = CpuCluster(0, "cluster0", coreList.take(4).map { it.copy(clusterIndex = 0) }.toMutableList())
-                val c1 = CpuCluster(1, "cluster1", coreList.drop(4).map { it.copy(clusterIndex = 1) }.toMutableList())
-                clusters.addAll(listOf(c0, c1))
-            } else {
-                val c0 = CpuCluster(0, "cluster0", coreList.map { it.copy(clusterIndex = 0) }.toMutableList())
-                clusters.add(c0)
-            }
+        if (clusters.isEmpty()) {
+            // Assign all cores to cluster0 if no explicit cpu-map node is present
+            val defaultCluster = CpuCluster(0, "cluster0", coreList.map { it.copy(clusterIndex = 0) }.toMutableList())
+            clusters.add(defaultCluster)
+            diagnostics.add("No /cpus/cpu-map topology node found. Cores displayed in flat layout.")
         }
 
         return CpuTopologyState(
             clusters = clusters,
             totalCores = coreList.size,
             hasCpuMap = cpuMapNode != null,
-            warnings = warnings
+            diagnostics = diagnostics
         )
     }
 
@@ -112,7 +136,7 @@ class CpuTopologyManager {
         rootNode: FdtNode,
         clusterSizes: List<Int>
     ): Pair<Boolean, String> {
-        val cpusNode = rootNode.findChild("cpus") ?: rootNode.children.firstOrNull { it.name.startsWith("cpus") }
+        val cpusNode = findCpusNode(rootNode)
             ?: return Pair(false, "Cannot find /cpus node in Device Tree")
 
         val cpuNodes = cpusNode.children.filter { it.name.startsWith("cpu@") || (it.name.startsWith("cpu") && it.name != "cpu-map") }
@@ -122,7 +146,7 @@ class CpuTopologyManager {
         val requestedSum = clusterSizes.sum()
 
         if (requestedSum != totalCores) {
-            return Pair(false, "Preset core count ($requestedSum) does not match actual CPU cores found in DTB ($totalCores)")
+            return Pair(false, "Preset core count ($requestedSum) does not match actual CPU cores found ($totalCores)")
         }
 
         // Ensure every CPU node has a phandle
@@ -141,7 +165,7 @@ class CpuTopologyManager {
             }
         }
 
-        // Reconstruct or update cpu-map node
+        // Reconstruct cpu-map node
         var cpuMapNode = cpusNode.findChild("cpu-map")
         if (cpuMapNode == null) {
             cpuMapNode = FdtNode(name = "cpu-map", fullPath = "${cpusNode.fullPath}/cpu-map")
@@ -177,10 +201,9 @@ class CpuTopologyManager {
         }
 
         val msg = buildString {
-            appendLine("Topology successfully updated to ${clusterSizes.joinToString("+")}:")
-            appendLine("- /cpus/cpu-map reconstructed with ${clusterSizes.size} clusters")
-            appendLine("- Mapped $totalCores cores with valid hardware phandles")
-            appendLine("NOTE: This updates scheduler affinity topology in Linux kernel. CPUFreq DVFS policies remain tied to hardware clock/regulator domains.")
+            appendLine("Topology updated to ${clusterSizes.joinToString("+")}:")
+            appendLine("- Reconstructed /cpus/cpu-map with ${clusterSizes.size} clusters")
+            appendLine("- Mapped $totalCores physical cores with valid phandles")
         }
 
         return Pair(true, msg)

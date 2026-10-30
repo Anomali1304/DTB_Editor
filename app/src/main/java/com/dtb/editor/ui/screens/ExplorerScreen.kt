@@ -28,32 +28,31 @@ import com.dtb.editor.viewmodel.DtbViewModel
 fun ExplorerScreen(
     viewModel: DtbViewModel
 ) {
-    val project by viewModel.project.collectAsState()
+    val workspace by viewModel.workspace.collectAsState()
     var searchQuery by remember { mutableStateOf("") }
     var expandedPaths by remember { mutableStateOf(setOf("/")) }
     var selectedProperty by remember { mutableStateOf<Pair<String, FdtProperty>?>(null) }
 
-    if (project == null) {
+    if (workspace == null || workspace?.parsedAst == null) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(DarkBackground),
+                .background(IdeBackground),
             contentAlignment = Alignment.Center
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Default.AccountTree, contentDescription = null, tint = TextTertiary, modifier = Modifier.size(56.dp))
-                Spacer(modifier = Modifier.height(12.dp))
-                Text("No Device Tree Loaded", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
-                Spacer(modifier = Modifier.height(6.dp))
-                Text("Import a DTB or load sample to explore nodes.", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                Icon(Icons.Default.AccountTree, contentDescription = null, tint = TextMuted, modifier = Modifier.size(36.dp))
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("No Parsed Device Tree", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Import a file or open DTS source to inspect the tree.", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
             }
         }
         return
     }
 
-    val rootNode = project!!.rootNode
+    val rootNode = workspace!!.parsedAst!!
 
-    // Collect flattened visible items
     fun flattenTree(node: FdtNode, depth: Int): List<Pair<FdtNode, Int>> {
         val list = mutableListOf<Pair<FdtNode, Int>>()
         list.add(Pair(node, depth))
@@ -81,171 +80,167 @@ fun ExplorerScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(DarkBackground)
+            .background(IdeBackground)
     ) {
-        // Search & Controls bar
+        // Quick Navigation Shortcuts Bar for Key Nodes
         Surface(
-            color = DarkSurface,
-            tonalElevation = 2.dp,
+            color = IdeSurfaceHeader,
+            tonalElevation = 1.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+            Column(modifier = Modifier.padding(8.dp)) {
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
-                    placeholder = { Text("Filter nodes (e.g. cpus, thermal, clock)...", color = TextSecondary) },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = TerminalCyan) },
+                    placeholder = { Text("Search nodes or properties...", color = TextMuted, fontSize = 11.sp) },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = IdePrimaryCyan, modifier = Modifier.size(16.dp)) },
                     trailingIcon = {
                         if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { searchQuery = "" }) {
-                                Icon(Icons.Default.Close, contentDescription = "Clear", tint = TextSecondary)
+                            IconButton(onClick = { searchQuery = "" }, modifier = Modifier.size(24.dp)) {
+                                Icon(Icons.Default.Close, contentDescription = "Clear", tint = TextSecondary, modifier = Modifier.size(16.dp))
                             }
                         }
                     },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().height(36.dp),
+                    shape = RoundedCornerShape(4.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = TerminalCyan,
-                        unfocusedBorderColor = DarkSurfaceVariant,
-                        focusedContainerColor = DarkSurfaceVariant,
-                        unfocusedContainerColor = DarkSurfaceVariant
+                        focusedBorderColor = IdePrimaryCyan,
+                        unfocusedBorderColor = IdeBorder,
+                        focusedContainerColor = IdeSurface,
+                        unfocusedContainerColor = IdeSurface
                     ),
-                    singleLine = true
+                    singleLine = true,
+                    textStyle = LocalTextStyle.current.copy(fontSize = 11.sp, color = TextPrimary)
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
+                // Navigation Target Shortcut Chips
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Text(
-                        text = "Total: ${rootNode.totalNodesCount} nodes • ${rootNode.totalPropertiesCount} props",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary,
-                        fontFamily = FontFamily.Monospace
-                    )
-
-                    Row {
-                        TextButton(
-                            onClick = {
-                                // Expand all top-level paths
-                                val all = mutableSetOf<String>()
-                                fun addPaths(n: FdtNode) {
-                                    all.add(n.fullPath)
-                                    n.children.forEach { addPaths(it) }
-                                }
-                                addPaths(rootNode)
-                                expandedPaths = all
-                            }
+                    val keyTargets = listOf("cpus", "thermal-zones", "regulators", "clocks", "memory")
+                    for (target in keyTargets) {
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = IdeBorder.copy(alpha = 0.6f),
+                            modifier = Modifier.clickable { searchQuery = target }
                         ) {
-                            Text("Expand All", style = MaterialTheme.typography.labelSmall, color = TerminalCyan)
-                        }
-                        TextButton(onClick = { expandedPaths = setOf("/") }) {
-                            Text("Collapse", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                            Text(
+                                text = target,
+                                color = IdePrimaryCyan,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
                         }
                     }
                 }
             }
         }
 
-        // Tree content
+        HorizontalDivider(color = IdeBorder)
+
+        // Tree List Area
         LazyColumn(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             items(flattenedNodes) { (node, depth) ->
                 val isExpanded = expandedPaths.contains(node.fullPath)
                 val hasChildren = node.children.isNotEmpty()
 
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                    shape = RoundedCornerShape(8.dp),
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = (depth * 14).coerceAtMost(140).dp)
+                        .padding(start = (depth * 12).coerceAtMost(120).dp)
                 ) {
-                    Column(
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable(enabled = hasChildren) {
-                                    expandedPaths = if (isExpanded) {
-                                        expandedPaths - node.fullPath
-                                    } else {
-                                        expandedPaths + node.fullPath
-                                    }
+                            .clip(RoundedCornerShape(2.dp))
+                            .clickable(enabled = hasChildren) {
+                                expandedPaths = if (isExpanded) {
+                                    expandedPaths - node.fullPath
+                                } else {
+                                    expandedPaths + node.fullPath
                                 }
-                        ) {
-                            if (hasChildren) {
-                                Icon(
-                                    imageVector = if (isExpanded) Icons.Default.ExpandMore else Icons.Default.ChevronRight,
-                                    contentDescription = null,
-                                    tint = TerminalCyan,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            } else {
-                                Spacer(modifier = Modifier.width(20.dp))
                             }
-
-                            Spacer(modifier = Modifier.width(6.dp))
-
-                            Text(
-                                text = node.name.ifEmpty { "/" },
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = if (node.name.startsWith("cpu")) TerminalGreen else TextPrimary,
-                                fontFamily = FontFamily.Monospace,
-                                modifier = Modifier.weight(1f)
+                            .padding(vertical = 4.dp, horizontal = 4.dp)
+                    ) {
+                        if (hasChildren) {
+                            Icon(
+                                imageVector = if (isExpanded) Icons.Default.ExpandMore else Icons.Default.ChevronRight,
+                                contentDescription = null,
+                                tint = IdePrimaryCyan,
+                                modifier = Modifier.size(16.dp)
                             )
-
-                            // Node category badge
-                            NodeCategoryBadge(node.name)
+                        } else {
+                            Spacer(modifier = Modifier.width(16.dp))
                         }
 
-                        // Display properties summary if expanded
-                        if (isExpanded && node.properties.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = 26.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                for (prop in node.properties) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(DarkSurfaceVariant.copy(alpha = 0.5f))
-                                            .clickable { selectedProperty = Pair(node.name, prop) }
-                                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = prop.name,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = TerminalCyan,
-                                            fontFamily = FontFamily.Monospace
-                                        )
-                                        Text(
-                                            text = prop.formattedValue().take(30) + if (prop.formattedValue().length > 30) "…" else "",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = TextSecondary,
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = 11.sp
-                                        )
-                                    }
+                        Spacer(modifier = Modifier.width(4.dp))
+
+                        Text(
+                            text = node.name.ifEmpty { "/" },
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (node.name.startsWith("cpu")) IdeSecondaryGreen else TextPrimary,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        if (node.properties.isNotEmpty()) {
+                            Text(
+                                text = "${node.properties.size} props",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextMuted,
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+
+                    // Properties
+                    if (isExpanded && node.properties.isNotEmpty()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 20.dp, top = 2.dp, bottom = 4.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            for (prop in node.properties) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(2.dp))
+                                        .background(IdeSurface)
+                                        .clickable { selectedProperty = Pair(node.name, prop) }
+                                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = prop.name,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = SyntaxPropertyName,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 10.sp
+                                    )
+                                    Text(
+                                        text = prop.formattedValue().take(28) + if (prop.formattedValue().length > 28) "…" else "",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextSecondary,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 10.sp
+                                    )
                                 }
                             }
                         }
@@ -255,37 +250,20 @@ fun ExplorerScreen(
         }
     }
 
-    // Property Detail Modal
+    // Property Detail Sheet
     if (selectedProperty != null) {
         val (nodeName, prop) = selectedProperty!!
         AlertDialog(
             onDismissRequest = { selectedProperty = null },
             title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Info, contentDescription = null, tint = TerminalCyan)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(prop.name, fontFamily = FontFamily.Monospace, color = TextPrimary)
-                }
+                Text("${prop.name} ($nodeName)", fontFamily = FontFamily.Monospace, fontSize = 14.sp, color = TextPrimary)
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "Node: $nodeName • ${prop.size} bytes",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = TextSecondary
-                    )
-
-                    HorizontalDivider(color = DarkSurfaceVariant)
-
-                    Text(
-                        text = "FORMATTED VALUE",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TerminalGreen,
-                        fontWeight = FontWeight.Bold
-                    )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("FORMATTED VALUE", style = MaterialTheme.typography.labelSmall, color = IdeSecondaryGreen)
                     Surface(
-                        color = DarkBackground,
-                        shape = RoundedCornerShape(6.dp),
+                        color = IdeBackground,
+                        shape = RoundedCornerShape(4.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
@@ -293,19 +271,15 @@ fun ExplorerScreen(
                             color = TextPrimary,
                             style = MaterialTheme.typography.bodySmall,
                             fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.padding(10.dp)
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(8.dp)
                         )
                     }
 
-                    Text(
-                        text = "RAW HEX DUMP",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TerminalOrange,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Text("HEX DUMP (${prop.size} B)", style = MaterialTheme.typography.labelSmall, color = IdePrimaryCyan)
                     Surface(
-                        color = DarkBackground,
-                        shape = RoundedCornerShape(6.dp),
+                        color = IdeBackground,
+                        shape = RoundedCornerShape(4.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
@@ -313,45 +287,18 @@ fun ExplorerScreen(
                             color = TextSecondary,
                             style = MaterialTheme.typography.bodySmall,
                             fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.padding(10.dp)
+                            fontSize = 10.sp,
+                            modifier = Modifier.padding(8.dp)
                         )
                     }
                 }
             },
             confirmButton = {
                 TextButton(onClick = { selectedProperty = null }) {
-                    Text("Close", color = TerminalCyan)
+                    Text("Close", color = IdePrimaryCyan)
                 }
             },
-            containerColor = DarkSurface
-        )
-    }
-}
-
-@Composable
-private fun NodeCategoryBadge(nodeName: String) {
-    val (label, color) = when {
-        nodeName.startsWith("cpu") -> Pair("CPU", TerminalGreen)
-        nodeName.contains("thermal") -> Pair("THERMAL", TerminalOrange)
-        nodeName.contains("regulator") -> Pair("REGULATOR", TerminalPurple)
-        nodeName.contains("clock") || nodeName == "clocks" -> Pair("CLOCK", TerminalCyan)
-        nodeName.startsWith("memory") -> Pair("MEMORY", TerminalYellow)
-        nodeName.contains("opp") || nodeName.contains("operating-points") -> Pair("DVFS", TerminalOrange)
-        nodeName.contains("interrupt") -> Pair("INTR", TerminalRed)
-        else -> return
-    }
-
-    Surface(
-        shape = RoundedCornerShape(4.dp),
-        color = color.copy(alpha = 0.15f)
-    ) {
-        Text(
-            text = label,
-            color = color,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            fontSize = 9.sp,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+            containerColor = IdeSurface
         )
     }
 }
