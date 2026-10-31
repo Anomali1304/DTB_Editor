@@ -38,6 +38,7 @@ data class ActiveWorkspace(
     val fileType: DtbFileType,
     val originalSizeBytes: Long,
     val originalSourceText: String,
+    val importedSourceText: String,
     val sourceText: String,
     val originalBytes: ByteArray? = null,
     val isDirty: Boolean = false,
@@ -120,6 +121,7 @@ class DtbViewModel(
                         fileType = DtbFileType.DTB,
                         originalSizeBytes = sampleBytes.size.toLong(),
                         originalSourceText = decompileRes.dtsText,
+                        importedSourceText = decompileRes.dtsText,
                         sourceText = decompileRes.dtsText,
                         originalBytes = sampleBytes,
                         isDirty = false,
@@ -175,6 +177,7 @@ class DtbViewModel(
                             fileType = DtbFileType.DT_TABLE,
                             originalSizeBytes = bytes.size.toLong(),
                             originalSourceText = decompileRes.dtsText,
+                            importedSourceText = decompileRes.dtsText,
                             sourceText = decompileRes.dtsText,
                             originalBytes = bytes,
                             isDirty = false,
@@ -193,6 +196,7 @@ class DtbViewModel(
                             fileType = fileType,
                             originalSizeBytes = bytes.size.toLong(),
                             originalSourceText = decompileRes.dtsText,
+                            importedSourceText = decompileRes.dtsText,
                             sourceText = decompileRes.dtsText,
                             originalBytes = bytes,
                             isDirty = false,
@@ -212,6 +216,7 @@ class DtbViewModel(
                             fileType = DtbFileType.DTS,
                             originalSizeBytes = bytes.size.toLong(),
                             originalSourceText = dtsText,
+                            importedSourceText = dtsText,
                             sourceText = dtsText,
                             originalBytes = null,
                             isDirty = false,
@@ -253,6 +258,7 @@ class DtbViewModel(
                     _workspace.value = current.copy(
                         selectedDtEntryIndex = entryIndex,
                         originalSourceText = decompileRes.dtsText,
+                        importedSourceText = decompileRes.dtsText,
                         sourceText = decompileRes.dtsText,
                         isDirty = false,
                         parsedAst = decompileRes.rootNode
@@ -415,12 +421,19 @@ class DtbViewModel(
                             }
 
                             ExportTargetType.RAW_COMPILED_DTB -> {
-                                val bytes = if (!current.isDirty && current.originalBytes != null && current.fileType != DtbFileType.DT_TABLE) {
+                                val bytes = if (current.sourceText == current.importedSourceText && current.originalBytes != null && current.fileType != DtbFileType.DT_TABLE) {
                                     current.originalBytes
                                 } else {
                                     val output = dtcEngine.compileDtsText(current.sourceText)
                                     if (!output.success || output.compiledBytes == null) {
                                         throw Exception("Compilation failed: Cannot export corrupt FDT")
+                                    }
+                                    if (current.sourceText != current.importedSourceText && current.originalBytes != null) {
+                                        val origHash = java.security.MessageDigest.getInstance("SHA-256").digest(current.originalBytes)
+                                        val newHash = java.security.MessageDigest.getInstance("SHA-256").digest(output.compiledBytes)
+                                        if (origHash.contentEquals(newHash)) {
+                                            throw Exception("Export Error: Compiled binary is identical to original stock file despite source edits!")
+                                        }
                                     }
                                     output.compiledBytes
                                 }
@@ -431,7 +444,7 @@ class DtbViewModel(
                                 val container = current.dtTableContainer
                                     ?: throw Exception("Current workspace was not imported from an Android DT Table container image")
 
-                                val fdtBytesToUse = if (!current.isDirty) {
+                                val fdtBytesToUse = if (current.sourceText == current.importedSourceText) {
                                     container.entries[current.selectedDtEntryIndex].fdtBytes
                                 } else {
                                     val output = dtcEngine.compileDtsText(current.sourceText)

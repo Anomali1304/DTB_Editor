@@ -276,4 +276,41 @@ class CpuTopologyEngineTest {
         assertEquals(4, cpuMap.children[0].children.size)
         assertEquals(4, cpuMap.children[1].children.size)
     }
+
+    @Test
+    fun testPreset44And422And8() {
+        val root = dtsParser.parse(STOCK_MT6789_DTS).rootNode
+        val cores = engine.extractCpuCores(root)
+        val controller = engine.discoverPerformanceController(root, cores)!!
+
+        val plan44 = engine.createPlanFromSizes(listOf(4, 4), 8)
+        val slots44 = engine.assignDomainSlots(plan44.clusters, cores, controller)
+        val (succ44, _) = engine.applyPlanToAst(root, plan44, cores, controller, slots44)
+        assertTrue(succ44)
+
+        val plan422 = engine.createPlanFromSizes(listOf(4, 2, 2), 8)
+        val slots422 = engine.assignDomainSlots(plan422.clusters, cores, controller)
+        val (succ422, _) = engine.applyPlanToAst(root, plan422, cores, controller, slots422)
+        assertTrue(succ422)
+
+        val plan8 = engine.createPlanFromSizes(listOf(8), 8)
+        val slots8 = engine.assignDomainSlots(plan8.clusters, cores, controller)
+        val (succ8, _) = engine.applyPlanToAst(root, plan8, cores, controller, slots8)
+        assertTrue(succ8)
+    }
+
+    @Test
+    fun testRegNamesNulTerminators() {
+        val root = dtsParser.parse(STOCK_MT6789_DTS).rootNode
+        val cores = engine.extractCpuCores(root)
+        val controller = engine.discoverPerformanceController(root, cores)!!
+        val plan233 = engine.createPlanFromSizes(listOf(2, 3, 3), 8)
+        val slots233 = engine.assignDomainSlots(plan233.clusters, cores, controller)
+        engine.applyPlanToAst(root, plan233, cores, controller, slots233)
+
+        val perfController = root.findNodeByPath("/soc/performance-controller@11bc00")!!
+        val regNamesProp = perfController.findProperty("reg-names")!!
+        val data = regNamesProp.data
+        assertTrue(data.contains(0.toByte()))
+    }
 }

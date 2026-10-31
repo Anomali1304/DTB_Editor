@@ -39,9 +39,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MyApplicationTheme {
-                MainWorkstationScreen()
-            }
+            RootContent()
+        }
+    }
+
+    @Composable
+    private fun RootContent() {
+        MyApplicationTheme {
+            MainWorkstationScreen()
         }
     }
 }
