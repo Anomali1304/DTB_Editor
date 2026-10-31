@@ -13,13 +13,15 @@ import com.dtb.editor.fdt.cpu.CpuTopologyState
 import com.dtb.editor.fdt.cpu.TopologyPlan
 import com.dtb.editor.fdt.cpu.TopologyPreviewResult
 import com.dtb.editor.fdt.model.FdtNode
+import com.dtb.editor.fdt.parser.ChunkEditAction
 import com.dtb.editor.fdt.parser.DtbEntryItem
 import com.dtb.editor.fdt.parser.DtbPayloadHelper
 import com.dtb.editor.fdt.parser.DtbPayloadStructure
+import com.dtb.editor.fdt.parser.DtsChunkUndoManager
+import com.dtb.editor.fdt.parser.DtsChunker
 import com.dtb.editor.fdt.parser.DtsFormatter
 import com.dtb.editor.fdt.parser.DtsParser
 import com.dtb.editor.fdt.parser.VendorBoot
-import com.dtb.editor.fdt.parser.VendorBootException
 import com.dtb.editor.fdt.parser.VendorBootImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -54,6 +56,9 @@ data class OpenFileState(
     val selectedEntryIndex: Int,
     val originalDtsText: String,
     val currentDtsText: String,
+    val chunks: List<String>,
+    val undoManager: DtsChunkUndoManager,
+    val isModified: Boolean,
     val parsedAst: FdtNode,
     val cpuTopology: CpuTopologyState
 )
@@ -91,6 +96,33 @@ class DtbViewModel(
     val snackbarMessage: SharedFlow<String> = _snackbarMessage.asSharedFlow()
 
     fun selectTab(tab: AppTab) {
+        if (tab == AppTab.CPU) {
+            val current = _openFileState.value
+            if (current != null && current.isModified) {
+                viewModelScope.launch {
+                    _isProcessing.value = true
+                    withContext(Dispatchers.Default) {
+                        try {
+                            val fullText = DtsChunker.join(current.chunks)
+                            val parsed = DtsParser().parse(fullText)
+                            val topology = topologyManager.extractTopology(parsed.rootNode)
+                            _openFileState.value = current.copy(
+                                currentDtsText = fullText,
+                                parsedAst = parsed.rootNode,
+                                cpuTopology = topology,
+                                isModified = false
+                            )
+                        } catch (e: Exception) {
+                            _snackbarMessage.emit(e.message ?: "Gagal memproses DTS")
+                        } finally {
+                            _isProcessing.value = false
+                        }
+                    }
+                    _activeTab.value = tab
+                }
+                return
+            }
+        }
         _activeTab.value = tab
     }
 
@@ -127,7 +159,6 @@ class DtbViewModel(
                         return@withContext
                     }
 
-                    // Check DT table or FDT magic
                     try {
                         val (structure, entries) = dtbPayloadHelper.parseStructure(bytes)
                         val fileType = if (structure is DtbPayloadStructure.AndroidDtTable) {
@@ -205,6 +236,8 @@ class DtbViewModel(
         val decompileRes = dtcEngine.decompileBytes(selectedFdt).getOrThrow()
         val ast = decompileRes.rootNode
         val topology = topologyManager.extractTopology(ast)
+        val chunks = DtsChunker.split(decompileRes.dtsText)
+        val undoManager = DtsChunkUndoManager()
 
         _openFileState.value = OpenFileState(
             fileName = fileName,
@@ -217,22 +250,50 @@ class DtbViewModel(
             selectedEntryIndex = selectedIndex,
             originalDtsText = decompileRes.dtsText,
             currentDtsText = decompileRes.dtsText,
+            chunks = chunks,
+            undoManager = undoManager,
+            isModified = false,
             parsedAst = ast,
             cpuTopology = topology
         )
         _activeTab.value = AppTab.CPU
     }
 
-    fun updateDtsText(newText: String) {
+    fun updateDtsChunk(chunkIndex: Int, newText: String) {
         val current = _openFileState.value ?: return
-        if (current.currentDtsText == newText) return
-        val parsed = DtsParser().parse(newText)
-        val topology = topologyManager.extractTopology(parsed.rootNode)
+        if (chunkIndex !in current.chunks.indices) return
+        val oldText = current.chunks[chunkIndex]
+        if (oldText == newText) return
+
+        current.undoManager.recordAction(ChunkEditAction(chunkIndex, oldText, newText))
+        val updatedChunks = current.chunks.toMutableList()
+        updatedChunks[chunkIndex] = newText
         _openFileState.value = current.copy(
-            currentDtsText = newText,
-            parsedAst = parsed.rootNode,
-            cpuTopology = topology
+            chunks = updatedChunks,
+            isModified = true
         )
+    }
+
+    fun undo() {
+        val current = _openFileState.value ?: return
+        val chunks = current.chunks.toMutableList()
+        if (current.undoManager.undo(chunks) != null) {
+            _openFileState.value = current.copy(
+                chunks = chunks,
+                isModified = true
+            )
+        }
+    }
+
+    fun redo() {
+        val current = _openFileState.value ?: return
+        val chunks = current.chunks.toMutableList()
+        if (current.undoManager.redo(chunks) != null) {
+            _openFileState.value = current.copy(
+                chunks = chunks,
+                isModified = true
+            )
+        }
     }
 
     fun applyCustomPlan(clusterConfigs: List<ClusterConfig>, syncCpufreq: Boolean) {
@@ -241,8 +302,9 @@ class DtbViewModel(
             _isProcessing.value = true
             withContext(Dispatchers.Default) {
                 try {
-                    val beforeAst = DtsParser().parse(current.currentDtsText).rootNode
-                    val parsed = DtsParser().parse(current.currentDtsText)
+                    val fullText = DtsChunker.join(current.chunks)
+                    val beforeAst = DtsParser().parse(fullText).rootNode
+                    val parsed = DtsParser().parse(fullText)
                     val (success, msg) = topologyManager.applyCustomPlan(parsed.rootNode, clusterConfigs, syncCpufreq)
                     if (!success) {
                         _snackbarMessage.emit("Gagal menerapkan topologi: $msg")
@@ -261,7 +323,14 @@ class DtbViewModel(
                         return@withContext
                     }
 
-                    updateDtsText(formattedDts)
+                    val newChunks = DtsChunker.split(formattedDts)
+                    _openFileState.value = current.copy(
+                        currentDtsText = formattedDts,
+                        chunks = newChunks,
+                        parsedAst = parsed.rootNode,
+                        cpuTopology = topologyManager.extractTopology(parsed.rootNode),
+                        isModified = false
+                    )
                     _snackbarMessage.emit("Topologi diterapkan ke DTS")
                 } catch (e: Exception) {
                     _snackbarMessage.emit(e.message ?: "Gagal menerapkan topologi")
@@ -279,41 +348,36 @@ class DtbViewModel(
 
     fun prepareSaveBytes(): ByteArray? {
         val current = _openFileState.value ?: return null
+        val fullText = DtsChunker.join(current.chunks)
         return try {
-            if (current.currentDtsText == current.originalDtsText) {
+            if (fullText == current.originalDtsText && !current.isModified) {
                 return current.originalBytes
             }
 
-            // 1. Compile modified DTS to FDT binary
-            val compileResult = dtcEngine.compileDtsText(current.currentDtsText)
+            val compileResult = dtcEngine.compileDtsText(fullText)
             if (!compileResult.success || compileResult.compiledBytes == null) {
                 throw Exception("Kompilasi DTS gagal: ${compileResult.log}")
             }
             val newFdtBytes = compileResult.compiledBytes
 
-            // 2. Verify compiled FDT can be decompiled
             val decompileCheck = dtcEngine.decompileBytes(newFdtBytes)
             if (decompileCheck.isFailure) {
                 throw Exception("FDT hasil kompilasi tidak dapat di-decompile ulang")
             }
 
-            // 3. Rebuild DTB block
             val newDtbBytes = dtbPayloadHelper.rebuild(
                 current.dtbPayloadStructure,
                 current.selectedEntryIndex,
                 newFdtBytes
             )
 
-            // 4. Output format handling
             when (current.fileType) {
                 InputFileType.VENDOR_BOOT -> {
                     val vbImage = current.vendorBootImage
                         ?: throw Exception("Data header vendor_boot tidak tersedia")
                     val repacked = vendorBoot.repackToBytes(current.originalBytes, vbImage, newDtbBytes)
 
-                    // In-memory repack verification
                     val verifyParsed = vendorBoot.parse(repacked)
-                    val md = MessageDigest.getInstance("SHA-256")
                     val origRamdiskSha = vbImage.ramdiskSha256
                     val newRamdiskSha = verifyParsed.ramdiskSha256
                     if (!origRamdiskSha.contentEquals(newRamdiskSha)) {
@@ -329,7 +393,6 @@ class DtbViewModel(
                         }
                     }
 
-                    // Verify unedited DTB entries in repacked image
                     val (_, repackedEntries) = dtbPayloadHelper.parseStructure(verifyParsed.dtbBytes)
                     for (i in current.dtbEntries.indices) {
                         if (i != current.selectedEntryIndex) {
@@ -344,7 +407,6 @@ class DtbViewModel(
                     repacked
                 }
                 InputFileType.DT_TABLE -> {
-                    // Verify unedited entries in DT table
                     val (_, rebuiltEntries) = dtbPayloadHelper.parseStructure(newDtbBytes)
                     for (i in current.dtbEntries.indices) {
                         if (i != current.selectedEntryIndex) {
@@ -390,10 +452,14 @@ class DtbViewModel(
                         ?: throw Exception("Gagal membuka file tujuan simpan")
                     stream.use { it.write(bytes) }
 
-                    // Mark as clean
                     val current = _openFileState.value
                     if (current != null) {
-                        _openFileState.value = current.copy(originalDtsText = current.currentDtsText)
+                        val fullText = DtsChunker.join(current.chunks)
+                        _openFileState.value = current.copy(
+                            originalDtsText = fullText,
+                            currentDtsText = fullText,
+                            isModified = false
+                        )
                     }
                     _snackbarMessage.emit("File berhasil disimpan")
                 } catch (e: Exception) {

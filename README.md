@@ -11,5 +11,8 @@ Aplikasi Android untuk membuka, mengedit topologi CPU dan sumber DTS, serta meny
 ## Cara Pakai
 
 1. Buka aplikasi, lalu pilih file `vendor_boot.img` atau file Device Tree (`.dtb`).
-2. Gunakan tab **CPU** untuk mengatur topologi core dan slot domain cpufreq, atau tab **DTS** untuk mengedit kode sumber langsung.
+2. Gunakan tab **CPU** untuk mengatur topologi core dan slot domain cpufreq, atau tab **DTS** untuk mengedit kode sumber secara tervirtualisasi.
 3. Tekan tombol **Simpan** di bilah atas untuk menulis hasil modifikasi ke file baru.
+
+## Batasan Editor DTS
+- Seleksi teks pada tab DTS dibatasi di dalam potongan (chunk) masing-masing dan tidak bisa melewati batas potongan.
