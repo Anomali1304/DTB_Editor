@@ -58,6 +58,7 @@ fun CpuTopologyScreen(
     }
 
     val preview = viewModel.previewPlan(draftConfigs, syncCpufreq)
+    var selectedPreset by remember(fileState.currentDtsText) { mutableStateOf<List<Int>?>(null) }
 
     LazyColumn(
         modifier = Modifier
@@ -113,11 +114,16 @@ fun CpuTopologyScreen(
                 ) {
                     val presets = getApplicablePresets(totalCores)
                     for (preset in presets) {
+                        val isSelected = preset == selectedPreset
                         SuggestionChip(
                             onClick = {
                                 draftConfigs = createConfigsFromSizes(preset, totalCores)
+                                selectedPreset = preset
                             },
-                            label = { Text(preset.joinToString("+")) }
+                            label = { Text(preset.joinToString("+")) },
+                            colors = if (isSelected) SuggestionChipDefaults.suggestionChipColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer
+                            ) else SuggestionChipDefaults.suggestionChipColors()
                         )
                     }
                 }
