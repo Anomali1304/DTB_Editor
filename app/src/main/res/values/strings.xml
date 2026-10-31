@@ -44,4 +44,5 @@
     <string name="editor_info">%1$d parts (%2$d lines)</string>
     <string name="import_vb">Import Vendor Boot Image</string>
     <string name="import_dtb">Import Device Tree Blob</string>
+    <string name="capacity_info">Capacity represents the performance rating of the core.</string>
 </resources>

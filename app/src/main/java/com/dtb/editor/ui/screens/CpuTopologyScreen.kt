@@ -157,11 +157,18 @@ fun CpuTopologyScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = stringResource(R.string.core_to_cluster_assignment),
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Column {
+                        Text(
+                            text = stringResource(R.string.core_to_cluster_assignment),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = stringResource(R.string.capacity_info),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        )
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         // Cluster customization disabled for MT6789
                     }
@@ -330,7 +337,7 @@ private fun CpuAssignmentRow(
                 )
                 val subText = buildString {
                     if (core.microarch.isNotBlank()) append(core.microarch.replace("arm,", ""))
-                    if (core.capacity != null) append(" • cap ${core.capacity}")
+                    if (core.capacity != null) append(" • capacity ${core.capacity}")
                 }
                 if (subText.isNotBlank()) {
                     Text(
@@ -345,8 +352,9 @@ private fun CpuAssignmentRow(
                 for (cIdx in 0 until clusterCount) {
                     SegmentedButton(
                         selected = currentCluster == cIdx,
-                        onClick = { onSelectCluster(cIdx) },
-                        shape = SegmentedButtonDefaults.itemShape(index = cIdx, count = clusterCount)
+                        onClick = { /* Disabled for MT6789 */ },
+                        shape = SegmentedButtonDefaults.itemShape(index = cIdx, count = clusterCount),
+                        enabled = false
                     ) {
                         Text("C$cIdx", style = MaterialTheme.typography.labelSmall)
                     }
