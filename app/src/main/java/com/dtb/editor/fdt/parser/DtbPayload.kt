@@ -81,7 +81,7 @@ class DtbPayloadHelper {
             }
         }
 
-        throw IllegalArgumentException("Format DTB tidak dikenali (magic: 0x${Integer.toHexString(magicBE)})")
+        throw IllegalArgumentException("Unrecognized DTB format (magic: 0x${Integer.toHexString(magicBE)})")
     }
 
     fun rebuild(structure: DtbPayloadStructure, updatedIndex: Int, newFdtBytes: ByteArray): ByteArray {
@@ -116,7 +116,7 @@ class DtbPayloadHelper {
 
             if (magic == FdtHeader.FDT_MAGIC) {
                 require(totalsize >= 40 && offset + totalsize <= bytes.size) {
-                    "Ukuran totalsize FDT tidak valid ($totalsize) pada offset $offset"
+                    "Invalid FDT totalsize ($totalsize) at offset $offset"
                 }
                 val slice = bytes.copyOfRange(offset, (offset + totalsize).toInt())
                 list.add(slice)
@@ -128,10 +128,10 @@ class DtbPayloadHelper {
                 if (bytes.slice(offset until bytes.size).all { it == 0.toByte() }) {
                     break
                 }
-                throw IllegalArgumentException("Magic FDT tidak valid pada offset $offset: 0x${magic.toString(16)}")
+                throw IllegalArgumentException("Invalid FDT magic at offset $offset: 0x${magic.toString(16)}")
             }
         }
-        require(list.isNotEmpty()) { "Tidak ada blob FDT yang valid ditemukan" }
+        require(list.isNotEmpty()) { "No valid FDT blob found" }
         return list
     }
 

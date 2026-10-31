@@ -68,11 +68,11 @@ class VendorBoot {
 
     fun parse(bytes: ByteArray): VendorBootImage {
         val totalFileSize = bytes.size.toLong()
-        require(bytes.size >= HDR_SIZE_V3) { "File terlalu kecil untuk header vendor_boot" }
+        require(bytes.size >= HDR_SIZE_V3) { "File too small for vendor_boot header" }
 
         val magicStr = bytes.sliceArray(0 until 8).toString(Charsets.US_ASCII)
         if (magicStr != MAGIC) {
-            throw VendorBootException("Magic vendor_boot tidak valid")
+            throw VendorBootException("Invalid vendor_boot magic")
         }
 
         val buf = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
@@ -80,12 +80,12 @@ class VendorBoot {
 
         val headerVersion = buf.int
         if (headerVersion != 3 && headerVersion != 4) {
-            throw VendorBootException("Versi header belum didukung: v$headerVersion")
+            throw VendorBootException("Header version not supported: v$headerVersion")
         }
 
         val pageSize = buf.int
         if (pageSize < MIN_PAGE_SIZE || (pageSize and (pageSize - 1)) != 0) {
-            throw VendorBootException("Ukuran page tidak valid: $pageSize (harus pangkat dua dan >= 4096)")
+            throw VendorBootException("Invalid page size: $pageSize (must be power of two and >= 4096)")
         }
 
         val kernelAddr = buf.int.toLong() and 0xFFFFFFFFL
@@ -102,7 +102,7 @@ class VendorBoot {
         val headerSize = buf.int
         val minHdrSize = if (headerVersion == 3) HDR_SIZE_V3 else HDR_SIZE_V4
         if (headerSize < minHdrSize) {
-            throw VendorBootException("Header size tidak valid: $headerSize (minimal $minHdrSize)")
+            throw VendorBootException("Invalid header size: $headerSize (min $minHdrSize)")
         }
 
         val dtbSize = buf.int.toLong() and 0xFFFFFFFFL
@@ -144,7 +144,7 @@ class VendorBoot {
         }
 
         if (payloadEndOffset > totalFileSize) {
-            throw VendorBootException("Blok vendor_boot melebihi ukuran file ($payloadEndOffset > $totalFileSize)")
+            throw VendorBootException("Vendor boot payload exceeds file size ($payloadEndOffset > $totalFileSize)")
         }
 
         var hasAvbFooter = false

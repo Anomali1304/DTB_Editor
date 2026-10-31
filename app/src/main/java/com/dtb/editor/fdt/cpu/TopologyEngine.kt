@@ -123,7 +123,7 @@ class TopologyEngine {
             val dupes = manualSelections.groupingBy { it }.eachCount().filter { it.value > 1 }.keys
             if (dupes.isNotEmpty()) {
                 duplicateSlots.addAll(dupes)
-                errors.add("Slot yang sama (${dupes.joinToString { "0x" + it.toString(16) }}) dipilih oleh lebih dari satu cluster")
+                errors.add("Slots (${dupes.joinToString { "0x" + it.toString(16) }}) selected by more than one cluster")
             }
 
             if (clusterConfigs.size > controllerInfo.availableSlots.size) {
@@ -137,7 +137,7 @@ class TopologyEngine {
                 try {
                     assignedSlots = assignDomainSlots(plan.clusters, cpuCores, controllerInfo)
                 } catch (e: Exception) {
-                    errors.add(e.message ?: "Gagal menentukan slot domain")
+                    errors.add(e.message ?: "Failed to determine slot domain")
                 }
             }
         }
@@ -832,7 +832,7 @@ class TopologyEngine {
                 isValid = true,
                 unauthorizedPaths = emptyList(),
                 authorizedChanges = authorizedChanges,
-                message = "Hanya perubahan topologi yang terdeteksi"
+                message = "Only topology changes detected"
             )
         }
     }

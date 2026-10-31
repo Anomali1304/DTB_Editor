@@ -133,10 +133,10 @@ class DtbViewModel(
                 try {
                     val fileName = queryFileName(context, uri)
                     val inputStream = context.contentResolver.openInputStream(uri)
-                        ?: throw Exception("Gagal membuka stream file")
+                        ?: throw Exception("Failed to open file stream")
                     val bytes = inputStream.use { it.readBytes() }
                     if (bytes.size < 4) {
-                        _snackbarMessage.emit("Format file tidak dikenali")
+                        _snackbarMessage.emit("Unrecognized file format")
                         return@withContext
                     }
 
@@ -181,10 +181,10 @@ class DtbViewModel(
                             loadEntryDirect(fileName, fileType, bytes, false, null, structure, entries, 0)
                         }
                     } catch (_: Exception) {
-                        _snackbarMessage.emit("Format file tidak dikenali")
+                        _snackbarMessage.emit("Unrecognized file format")
                     }
                 } catch (e: Exception) {
-                    _snackbarMessage.emit(e.message ?: "Gagal membuka file")
+                    _snackbarMessage.emit(e.message ?: "Failed to open file")
                 } finally {
                     _isProcessing.value = false
                 }
@@ -210,7 +210,7 @@ class DtbViewModel(
                     )
                     _pendingMultiDtb.value = null
                 } catch (e: Exception) {
-                    _snackbarMessage.emit(e.message ?: "Gagal memuat entri DTB")
+                    _snackbarMessage.emit(e.message ?: "Failed to load DTB entry")
                 } finally {
                     _isProcessing.value = false
                 }
@@ -307,7 +307,7 @@ class DtbViewModel(
                     val parsed = DtsParser().parse(fullText)
                     val (success, msg) = topologyManager.applyCustomPlan(parsed.rootNode, clusterConfigs, syncCpufreq)
                     if (!success) {
-                        _snackbarMessage.emit("Gagal menerapkan topologi: $msg")
+                        _snackbarMessage.emit("Failed to apply topology: $msg")
                         return@withContext
                     }
 
@@ -333,7 +333,7 @@ class DtbViewModel(
                     )
                     _snackbarMessage.emit("Topologi diterapkan ke DTS")
                 } catch (e: Exception) {
-                    _snackbarMessage.emit(e.message ?: "Gagal menerapkan topologi")
+                    _snackbarMessage.emit(e.message ?: "Failed to apply topology")
                 } finally {
                     _isProcessing.value = false
                 }
@@ -362,7 +362,7 @@ class DtbViewModel(
 
             val decompileCheck = dtcEngine.decompileBytes(newFdtBytes)
             if (decompileCheck.isFailure) {
-                throw Exception("FDT hasil kompilasi tidak dapat di-decompile ulang")
+                throw Exception("Compiled FDT cannot be decompiled")
             }
 
             val newDtbBytes = dtbPayloadHelper.rebuild(
@@ -374,7 +374,7 @@ class DtbViewModel(
             when (current.fileType) {
                 InputFileType.VENDOR_BOOT -> {
                     val vbImage = current.vendorBootImage
-                        ?: throw Exception("Data header vendor_boot tidak tersedia")
+                        ?: throw Exception("Vendor boot header data not available")
                     val repacked = vendorBoot.repackToBytes(current.originalBytes, vbImage, newDtbBytes)
 
                     val verifyParsed = vendorBoot.parse(repacked)
@@ -437,7 +437,7 @@ class DtbViewModel(
             }
         } catch (e: Exception) {
             viewModelScope.launch {
-                _snackbarMessage.emit(e.message ?: "Verifikasi sebelum simpan gagal")
+                _snackbarMessage.emit(e.message ?: "Verification before save failed")
             }
             null
         }
@@ -449,7 +449,7 @@ class DtbViewModel(
             withContext(Dispatchers.IO) {
                 try {
                     val stream = context.contentResolver.openOutputStream(uri)
-                        ?: throw Exception("Gagal membuka file tujuan simpan")
+                        ?: throw Exception("Failed to open file tujuan simpan")
                     stream.use { it.write(bytes) }
 
                     val current = _openFileState.value
@@ -461,9 +461,9 @@ class DtbViewModel(
                             isModified = false
                         )
                     }
-                    _snackbarMessage.emit("File berhasil disimpan")
+                    _snackbarMessage.emit("File saved successfully")
                 } catch (e: Exception) {
-                    _snackbarMessage.emit(e.message ?: "Gagal menyimpan file")
+                    _snackbarMessage.emit(e.message ?: "Failed to save file")
                 } finally {
                     _isProcessing.value = false
                 }

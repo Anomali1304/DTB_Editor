@@ -16,6 +16,8 @@ import com.dtb.editor.fdt.cpu.CpuCoreDetail
 import com.dtb.editor.fdt.cpu.CpuTopologyState
 import com.dtb.editor.viewmodel.DtbViewModel
 import com.dtb.editor.viewmodel.OpenFileState
+import androidx.compose.ui.res.stringResource
+import com.dtb.editor.R
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -29,12 +31,12 @@ fun CpuTopologyScreen(
 
     if (totalCores == 0) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Tidak ada node CPU yang terdeteksi di Device Tree ini.")
+            Text(stringResource(R.string.no_cpu_nodes_detected))
         }
         return
     }
 
-    // Inisialisasi draft penugasan dari topologi saat ini
+    // Initializing draft topology from current state
     var draftConfigs by remember(fileState.currentDtsText) {
         val initial = if (top.clusters.isNotEmpty()) {
             top.clusters.map { cluster ->
