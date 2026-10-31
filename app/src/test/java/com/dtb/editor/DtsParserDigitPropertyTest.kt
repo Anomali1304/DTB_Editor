@@ -329,7 +329,7 @@ class DtsParserDigitPropertyTest {
             isolation.isValid
         )
         assertTrue("Unauthorized paths must be empty", isolation.unauthorizedPaths.isEmpty())
-        assertEquals("Hanya perubahan topologi yang terdeteksi", isolation.message)
+        assertEquals("Only topology changes detected", isolation.message)
 
         // Verify /soc/displayport is 100% intact
         val dpBefore = stockAst.findNodeByPath("/soc/displayport")

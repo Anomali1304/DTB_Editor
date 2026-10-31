@@ -231,7 +231,7 @@ class CpuTopologyPreviewTest {
         val preview = engine.previewPlan(configsDuplicate, cores, controller, syncCpufreq = true)
         assertFalse("Duplicate slot selection must be invalid", preview.isValid)
         assertTrue("Duplicate slot must be recorded", preview.duplicateSlots.contains(0x11bc10L))
-        assertTrue("Error message must explain duplicate slot", preview.errors.any { it.contains("lebih dari satu cluster") })
+        assertTrue("Error message must explain duplicate slot", preview.errors.any { it.contains("selected by more than one cluster") })
     }
 
     @Test
