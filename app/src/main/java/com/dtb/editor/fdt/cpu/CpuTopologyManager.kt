@@ -30,7 +30,7 @@ data class CpuTopologyState(
 )
 
 class CpuTopologyManager(
-    private val engine: TopologyEngine = TopologyEngine()
+    val engine: TopologyEngine = TopologyEngine()
 ) {
 
     fun extractTopology(rootNode: FdtNode): CpuTopologyState {

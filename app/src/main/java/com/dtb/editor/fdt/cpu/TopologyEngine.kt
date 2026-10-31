@@ -578,7 +578,7 @@ class TopologyEngine {
                 writeCellsValue(regBuffer, sSize, sizeCells)
             }
 
-            val controllerNode = controllerInfo.astNode
+            val controllerNode = rootNode.findNodeByPath(controllerInfo.fullPath) ?: controllerInfo.astNode
             val regPropIndex = controllerNode.properties.indexOfFirst { it.name == "reg" }
             val newRegProp = FdtProperty("reg", regBuffer.array())
             if (regPropIndex != -1) {
@@ -717,4 +717,130 @@ class TopologyEngine {
             }
         }
     }
+
+    /**
+     * Strictly verifies that AST differences between before and after are strictly isolated to:
+     * 1. /cpus/cpu-map (all child nodes and properties)
+     * 2. performance-domains (and generated phandle) in /cpus/cpu@*
+     * 3. reg and reg-names in performance-controller node referenced by phandle
+     *
+     * Rejects any external or accidental modifications.
+     */
+    fun verifyTopologyIsolation(
+        beforeAst: FdtNode,
+        afterAst: FdtNode,
+        controllerFullPath: String? = null
+    ): TopologyIsolationResult {
+        val unauthorizedPaths = mutableListOf<String>()
+        val authorizedChanges = mutableListOf<String>()
+
+        fun isPathAuthorized(path: String): Boolean {
+            // 1. Inside /cpus/cpu-map
+            if (path == "/cpus/cpu-map" || path.startsWith("/cpus/cpu-map/") || path.contains("/cpus/cpu-map")) {
+                return true
+            }
+            // 2. performance-domains or phandle on a cpu node
+            if (path.matches(Regex(""".*/cpu(@[^/]+)?/performance-domains"""))) {
+                return true
+            }
+            if (path.matches(Regex(""".*/cpu(@[^/]+)?/phandle"""))) {
+                return true
+            }
+            // 3. reg and reg-names in performance-controller
+            if (controllerFullPath != null) {
+                if (path == "$controllerFullPath/reg" || path == "$controllerFullPath/reg-names") {
+                    return true
+                }
+            }
+            if (path.contains("performance-controller") && (path.endsWith("/reg") || path.endsWith("/reg-names"))) {
+                return true
+            }
+            return false
+        }
+
+        fun diffNodes(before: FdtNode, after: FdtNode) {
+            val beforeProps = before.properties.associateBy { it.name }
+            val afterProps = after.properties.associateBy { it.name }
+
+            for ((name, bProp) in beforeProps) {
+                val propPath = "${before.fullPath}/$name"
+                val aProp = afterProps[name]
+                if (aProp == null) {
+                    if (isPathAuthorized(propPath)) {
+                        authorizedChanges.add("Removed prop: $propPath")
+                    } else {
+                        unauthorizedPaths.add(propPath)
+                    }
+                } else if (!bProp.data.contentEquals(aProp.data)) {
+                    if (isPathAuthorized(propPath)) {
+                        authorizedChanges.add("Modified prop: $propPath")
+                    } else {
+                        unauthorizedPaths.add(propPath)
+                    }
+                }
+            }
+
+            for ((name, _) in afterProps) {
+                if (!beforeProps.containsKey(name)) {
+                    val propPath = "${after.fullPath}/$name"
+                    if (isPathAuthorized(propPath)) {
+                        authorizedChanges.add("Added prop: $propPath")
+                    } else {
+                        unauthorizedPaths.add(propPath)
+                    }
+                }
+            }
+
+            val beforeChildren = before.children.associateBy { it.name }
+            val afterChildren = after.children.associateBy { it.name }
+
+            for ((cName, bChild) in beforeChildren) {
+                val aChild = afterChildren[cName]
+                if (aChild == null) {
+                    if (isPathAuthorized(bChild.fullPath)) {
+                        authorizedChanges.add("Removed node: ${bChild.fullPath}")
+                    } else {
+                        unauthorizedPaths.add(bChild.fullPath)
+                    }
+                } else {
+                    diffNodes(bChild, aChild)
+                }
+            }
+
+            for ((cName, aChild) in afterChildren) {
+                if (!beforeChildren.containsKey(cName)) {
+                    if (isPathAuthorized(aChild.fullPath)) {
+                        authorizedChanges.add("Added node: ${aChild.fullPath}")
+                    } else {
+                        unauthorizedPaths.add(aChild.fullPath)
+                    }
+                }
+            }
+        }
+
+        diffNodes(beforeAst, afterAst)
+
+        return if (unauthorizedPaths.isNotEmpty()) {
+            TopologyIsolationResult(
+                isValid = false,
+                unauthorizedPaths = unauthorizedPaths,
+                authorizedChanges = authorizedChanges,
+                message = "Apply ditolak: Perubahan di luar topologi CPU terdeteksi pada path: ${unauthorizedPaths.joinToString(", ")}"
+            )
+        } else {
+            TopologyIsolationResult(
+                isValid = true,
+                unauthorizedPaths = emptyList(),
+                authorizedChanges = authorizedChanges,
+                message = "Hanya perubahan topologi yang terdeteksi"
+            )
+        }
+    }
 }
+
+data class TopologyIsolationResult(
+    val isValid: Boolean,
+    val unauthorizedPaths: List<String>,
+    val authorizedChanges: List<String>,
+    val message: String
+)

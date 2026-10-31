@@ -136,6 +136,9 @@ class DtsParser {
                         }
                     } else {
                         val nodeName = if (nodeHeader == "/" || nodeHeader.isEmpty()) "/" else nodeHeader
+                        if (nodeName != "/" && !isValidNodeName(nodeName)) {
+                            warnings.add("Unrecognized or non-standard node name '$nodeName' in '${nodeStack.lastOrNull()?.fullPath ?: "/"}'")
+                        }
 
                         if (nodeName == "/") {
                             if (label != null) rootNode.label = label
@@ -170,15 +173,23 @@ class DtsParser {
 
                 ';' -> {
                     // Property statement
-                    if (rawToken.isNotEmpty() && !rawToken.startsWith("/")) {
+                    if (rawToken.isNotEmpty()) {
                         val currentNode = nodeStack.lastOrNull() ?: rootNode
-                        val prop = parsePropertyStatement(rawToken, warnings)
-                        if (prop != null) {
-                            val existingPropIndex = currentNode.properties.indexOfFirst { it.name == prop.name }
-                            if (existingPropIndex != -1) {
-                                currentNode.properties[existingPropIndex] = prop
+                        if (rawToken.startsWith("/")) {
+                            if (!rawToken.startsWith("/delete-property/") && !rawToken.startsWith("/delete-node/") && !rawToken.startsWith("/memreserve/")) {
+                                warnings.add("Unrecognized directive statement in node '${currentNode.fullPath}': '$rawToken'")
+                            }
+                        } else {
+                            val prop = parsePropertyStatement(rawToken, warnings)
+                            if (prop != null) {
+                                val existingPropIndex = currentNode.properties.indexOfFirst { it.name == prop.name }
+                                if (existingPropIndex != -1) {
+                                    currentNode.properties[existingPropIndex] = prop
+                                } else {
+                                    currentNode.properties.add(prop)
+                                }
                             } else {
-                                currentNode.properties.add(prop)
+                                warnings.add("Unrecognized property statement in node '${currentNode.fullPath}': '$rawToken'")
                             }
                         }
                     }
@@ -295,10 +306,19 @@ class DtsParser {
         }
     }
 
-    private fun isValidPropName(name: String): Boolean {
+    fun isValidPropName(name: String): Boolean {
         if (name.isEmpty()) return false
-        val first = name[0]
-        return (first.isLetter() || first == '#' || first == '_' || first == '$' || first == '/')
+        if (name.startsWith("/")) return true
+        val allowedChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,._+*#?@-$"
+        return name.all { it in allowedChars }
+    }
+
+    fun isValidNodeName(name: String): Boolean {
+        if (name.isEmpty()) return false
+        if (name == "/") return true
+        if (name.startsWith("&")) return true
+        val allowedChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,._+*#?@-"
+        return name.all { it in allowedChars }
     }
 
     private fun stripComments(source: String): String {

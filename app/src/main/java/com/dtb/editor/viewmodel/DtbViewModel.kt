@@ -19,6 +19,7 @@ import com.dtb.editor.fdt.diff.TreeComparisonResult
 import com.dtb.editor.fdt.model.CompilationOutput
 import com.dtb.editor.fdt.model.DtbFileType
 import com.dtb.editor.fdt.model.FdtNode
+import com.dtb.editor.fdt.model.FdtReserveEntry
 import com.dtb.editor.fdt.parser.DtTableContainer
 import com.dtb.editor.fdt.parser.DtTableParser
 import com.dtb.editor.fdt.parser.DtsFormatter
@@ -134,7 +135,8 @@ class DtbViewModel(
                     _diffSummary.value = diffEngine.compareNodes(ast, ast)
                     _activeTab.value = WorkspaceTab.SOURCE
                     _statusMessage.value = "Loaded sample_sm8450.dtb (${ast.totalNodesCount} nodes)"
-                    _diagnosticsLog.value = listOf(decompileRes.log)
+                    val roundtripLogs = verifyImportRoundtrip(ast)
+                    _diagnosticsLog.value = listOf(decompileRes.log) + roundtripLogs
                 } catch (e: Exception) {
                     _statusMessage.value = "Sample load error: ${e.message}"
                 } finally {
@@ -172,6 +174,7 @@ class DtbViewModel(
                         val initialEntry = container.entries.first()
                         val decompileRes = dtcEngine.decompileBytes(initialEntry.fdtBytes).getOrThrow()
                         logs.add(decompileRes.log)
+                        logs.addAll(verifyImportRoundtrip(decompileRes.rootNode))
 
                         ActiveWorkspace(
                             fileName = fileName,
@@ -191,6 +194,7 @@ class DtbViewModel(
                         val fileType = if (fileName.endsWith(".dtbo", ignoreCase = true)) DtbFileType.DTBO else DtbFileType.DTB
                         val decompileRes = dtcEngine.decompileBytes(bytes).getOrThrow()
                         logs.add(decompileRes.log)
+                        logs.addAll(verifyImportRoundtrip(decompileRes.rootNode))
 
                         ActiveWorkspace(
                             fileName = fileName,
@@ -211,6 +215,7 @@ class DtbViewModel(
                         if (parseResult.warnings.isNotEmpty()) {
                             logs.addAll(parseResult.warnings.map { "WARNING: $it" })
                         }
+                        logs.addAll(verifyImportRoundtrip(parseResult.rootNode, parseResult.reservations))
 
                         ActiveWorkspace(
                             fileName = fileName,
@@ -255,6 +260,7 @@ class DtbViewModel(
 
                     val logs = _diagnosticsLog.value.toMutableList()
                     logs.add("[DT Table] Switched to Entry $entryIndex (ID=0x${entry.id.toString(16)}, Size=${entry.dtSize} B)")
+                    logs.addAll(verifyImportRoundtrip(decompileRes.rootNode))
 
                     _workspace.value = current.copy(
                         selectedDtEntryIndex = entryIndex,
@@ -365,13 +371,30 @@ class DtbViewModel(
         viewModelScope.launch {
             _isProcessing.value = true
             withContext(Dispatchers.Default) {
+                val beforeAst = DtsParser().parse(current.sourceText).rootNode
                 val parsed = DtsParser().parse(current.sourceText)
                 val (success, msg) = topologyManager.applyPreset(parsed.rootNode, preset, syncCpufreq)
                 if (success) {
                     val formattedDts = DtsFormatter().format(parsed.rootNode, parsed.reservations)
-                    updateSourceText(formattedDts)
-                    _statusMessage.value = msg
-                    _cpuTopology.value = topologyManager.extractTopology(parsed.rootNode)
+                    val reparsedAfterAst = DtsParser().parse(formattedDts).rootNode
+
+                    val cores = topologyManager.engine.extractCpuCores(beforeAst)
+                    val controller = topologyManager.engine.discoverPerformanceController(beforeAst, cores)
+                    val isolation = topologyManager.engine.verifyTopologyIsolation(beforeAst, reparsedAfterAst, controller?.fullPath)
+
+                    if (!isolation.isValid) {
+                        _statusMessage.value = isolation.message
+                        val logs = _diagnosticsLog.value.toMutableList()
+                        logs.add("[ERROR] ${isolation.message}")
+                        _diagnosticsLog.value = logs
+                    } else {
+                        updateSourceText(formattedDts)
+                        _statusMessage.value = "Hanya perubahan topologi yang terdeteksi"
+                        val logs = _diagnosticsLog.value.toMutableList()
+                        logs.add("[Topology Apply] Hanya perubahan topologi yang terdeteksi")
+                        _diagnosticsLog.value = logs
+                        _cpuTopology.value = topologyManager.extractTopology(parsed.rootNode)
+                    }
                 } else {
                     _statusMessage.value = "Topology Error: $msg"
                 }
@@ -385,13 +408,30 @@ class DtbViewModel(
         viewModelScope.launch {
             _isProcessing.value = true
             withContext(Dispatchers.Default) {
+                val beforeAst = DtsParser().parse(current.sourceText).rootNode
                 val parsed = DtsParser().parse(current.sourceText)
                 val (success, msg) = topologyManager.applyCustomPlan(parsed.rootNode, clusterConfigs, syncCpufreq)
                 if (success) {
                     val formattedDts = DtsFormatter().format(parsed.rootNode, parsed.reservations)
-                    updateSourceText(formattedDts)
-                    _statusMessage.value = msg
-                    _cpuTopology.value = topologyManager.extractTopology(parsed.rootNode)
+                    val reparsedAfterAst = DtsParser().parse(formattedDts).rootNode
+
+                    val cores = topologyManager.engine.extractCpuCores(beforeAst)
+                    val controller = topologyManager.engine.discoverPerformanceController(beforeAst, cores)
+                    val isolation = topologyManager.engine.verifyTopologyIsolation(beforeAst, reparsedAfterAst, controller?.fullPath)
+
+                    if (!isolation.isValid) {
+                        _statusMessage.value = isolation.message
+                        val logs = _diagnosticsLog.value.toMutableList()
+                        logs.add("[ERROR] ${isolation.message}")
+                        _diagnosticsLog.value = logs
+                    } else {
+                        updateSourceText(formattedDts)
+                        _statusMessage.value = "Hanya perubahan topologi yang terdeteksi"
+                        val logs = _diagnosticsLog.value.toMutableList()
+                        logs.add("[Topology Apply] Hanya perubahan topologi yang terdeteksi")
+                        _diagnosticsLog.value = logs
+                        _cpuTopology.value = topologyManager.extractTopology(parsed.rootNode)
+                    }
                 } else {
                     _statusMessage.value = "Topology Error: $msg"
                 }
@@ -533,5 +573,28 @@ class DtbViewModel(
             }
         }
         return Pair(name, size)
+    }
+
+    private fun verifyImportRoundtrip(origRoot: FdtNode, reservations: List<FdtReserveEntry> = emptyList()): List<String> {
+        val verificationLogs = mutableListOf<String>()
+        try {
+            val formattedDts = DtsFormatter().format(origRoot, reservations)
+            val compileResult = dtcEngine.compileDtsText(formattedDts)
+            if (!compileResult.success || compileResult.compiledBytes == null) {
+                verificationLogs.add("Roundtrip compilation error: ${compileResult.log}")
+                return verificationLogs
+            }
+            val reparsedRoot = FdtBinaryParser().parse(compileResult.compiledBytes).rootNode
+            val comparison = treeComparator.compareTrees(origRoot, reparsedRoot)
+            if (!comparison.isExactMatch) {
+                val diffPaths = (comparison.missingNodes + comparison.missingProperties + comparison.changedProperties + comparison.structuralDifferences)
+                verificationLogs.add("Roundtrip tidak identik: ${diffPaths.joinToString(", ")}")
+            } else {
+                verificationLogs.add("[Roundtrip] Identik: 0 data loss (${origRoot.totalNodesCount} nodes, ${origRoot.totalPropertiesCount} properties)")
+            }
+        } catch (e: Exception) {
+            verificationLogs.add("Roundtrip verification error: ${e.message}")
+        }
+        return verificationLogs
     }
 }
