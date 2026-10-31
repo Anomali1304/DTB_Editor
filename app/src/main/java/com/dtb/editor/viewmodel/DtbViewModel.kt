@@ -399,7 +399,7 @@ class DtbViewModel(
                             val origEntryBytes = current.dtbEntries[i].fdtBytes
                             val repackedEntryBytes = repackedEntries.getOrNull(i)?.fdtBytes
                             if (repackedEntryBytes == null || !origEntryBytes.contentEquals(repackedEntryBytes)) {
-                                throw Exception("Entri DTB lain berubah saat repack")
+                                throw Exception("Another DTB entry changed during repack")
                             }
                         }
                     }
@@ -413,7 +413,7 @@ class DtbViewModel(
                             val origEntryBytes = current.dtbEntries[i].fdtBytes
                             val rebuiltEntryBytes = rebuiltEntries.getOrNull(i)?.fdtBytes
                             if (rebuiltEntryBytes == null || !origEntryBytes.contentEquals(rebuiltEntryBytes)) {
-                                throw Exception("Entri DTB lain berubah saat rekonstruksi tabel DT")
+                                throw Exception("Another DTB entry changed during DT table reconstruction")
                             }
                         }
                     }
@@ -427,7 +427,7 @@ class DtbViewModel(
                                 val origEntryBytes = current.dtbEntries[i].fdtBytes
                                 val rebuiltEntryBytes = rebuiltEntries.getOrNull(i)?.fdtBytes
                                 if (rebuiltEntryBytes == null || !origEntryBytes.contentEquals(rebuiltEntryBytes)) {
-                                    throw Exception("Entri FDT lain berubah saat rekonstruksi")
+                                    throw Exception("Another FDT entry changed during reconstruction")
                                 }
                             }
                         }

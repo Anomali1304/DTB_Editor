@@ -300,7 +300,7 @@ class CpuTopologyEngineTest {
         val (succ422, _) = engine.applyPlanToAst(root, plan422, cores, controller, slots422)
         assertTrue(succ422)
 
-        // [4, 4] -> 0x11bc10 dan 0x11bd30
+        // [4, 4] -> 0x11bc10 and 0x11bd30
         val plan44 = engine.createPlanFromSizes(listOf(4, 4), 8)
         val slots44 = engine.assignDomainSlots(plan44.clusters, cores, controller)
         assertEquals(0x11bc10L, slots44[0])

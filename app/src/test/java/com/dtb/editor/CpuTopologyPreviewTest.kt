@@ -247,7 +247,7 @@ class CpuTopologyPreviewTest {
 
         val preview = engine.previewPlan(configsEmpty, cores, controller, syncCpufreq = true)
         assertFalse("Empty cluster plan must be invalid", preview.isValid)
-        assertTrue("Error must mention empty cluster", preview.errors.any { it.contains("cannot be empty") || it.contains("tidak boleh kosong") })
+        assertTrue("Error must mention empty cluster", preview.errors.any { it.contains("cannot be empty") })
     }
 
     @Test

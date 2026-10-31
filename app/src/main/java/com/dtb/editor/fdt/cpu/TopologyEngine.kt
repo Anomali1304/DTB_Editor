@@ -825,7 +825,7 @@ class TopologyEngine {
                 isValid = false,
                 unauthorizedPaths = unauthorizedPaths,
                 authorizedChanges = authorizedChanges,
-                message = "Apply ditolak: Perubahan di luar topologi CPU terdeteksi pada path: ${unauthorizedPaths.joinToString(", ")}"
+                message = "Apply rejected: Changes outside CPU topology detected on path: ${unauthorizedPaths.joinToString(", ")}"
             )
         } else {
             TopologyIsolationResult(
