@@ -11,18 +11,8 @@ data class ClusterConfig(
     val selectedDomainSlot: Long? = null
 )
 
-data class DomainConfig(
-    val domainIndex: Int,
-    val clusterIndices: List<Int>,
-    val slotAddress: Long
-)
-
-/**
- * Validated topology plan representing desired CPU cluster layout, domain groupings, slot assignments, and sync settings.
- */
 data class TopologyPlan(
     val clusters: List<ClusterConfig>,
-    val domains: List<DomainConfig> = emptyList(),
     val syncCpufreq: Boolean = true,
     val warnings: List<String> = emptyList(),
     val errors: List<String> = emptyList(),

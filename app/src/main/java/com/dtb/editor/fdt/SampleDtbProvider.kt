@@ -107,7 +107,7 @@ object SampleDtbProvider {
             reg = <0x0 0x400>;
             enable-method = "psci";
             phandle = <0x5>;
-            operating-points-v2 = <0x51>;
+            operating-points-v2 = <0x50>;
         };
 
         cpu@500 {
@@ -116,7 +116,7 @@ object SampleDtbProvider {
             reg = <0x0 0x500>;
             enable-method = "psci";
             phandle = <0x6>;
-            operating-points-v2 = <0x51>;
+            operating-points-v2 = <0x50>;
         };
 
         cpu@600 {
@@ -125,69 +125,45 @@ object SampleDtbProvider {
             reg = <0x0 0x600>;
             enable-method = "psci";
             phandle = <0x7>;
-            operating-points-v2 = <0x51>;
+            operating-points-v2 = <0x50>;
         };
 
         cpu@700 {
             device_type = "cpu";
-            compatible = "arm,cortex-x2";
+            compatible = "arm,cortex-X2";
             reg = <0x0 0x700>;
             enable-method = "psci";
             phandle = <0x8>;
-            operating-points-v2 = <0x52>;
+            operating-points-v2 = <0x50>;
         };
     };
 
-    thermal-zones {
-        cpu-thermal {
-            polling-delay-passive = <0xfa>;
-            polling-delay = <0x3e8>;
-            thermal-sensors = <0x80 0x0>;
+    soc@0 {
+        compatible = "simple-bus";
+        #address-cells = <0x2>;
+        #size-cells = <0x2>;
+        ranges;
 
-            trips {
-                cpu_alert0: trip-point@0 {
-                    temperature = <0x14c08>;
-                    hysteresis = <0x7d0>;
-                    type = "passive";
-                };
-                cpu_crit: trip-point@1 {
-                    temperature = <0x1adb0>;
-                    hysteresis = <0x0>;
-                    type = "critical";
-                };
-            };
+        serial@990000 {
+            compatible = "qcom,geni-uart";
+            reg = <0x0 0x990000 0x0 0x4000>;
+            interrupts = <0x0 0x25 0x4>;
+            clocks = <0x51 0x0>, <0x51 0x1>;
+            clock-names = "se", "m-ahb";
         };
-    };
 
-    clocks {
-        xo_board: xo-board {
-            compatible = "fixed-clock";
-            #clock-cells = <0x0>;
-            clock-frequency = <0x124f800>;
-        };
-    };
-
-    regulators {
-        pm8350_s1: regulator-s1 {
-            compatible = "regulator-fixed";
-            regulator-name = "vdd_cpu_a510";
-            regulator-min-microvolt = <0xb71b0>;
-            regulator-max-microvolt = <0x10c8e0>;
-        };
-        pm8350_s2: regulator-s2 {
-            compatible = "regulator-fixed";
-            regulator-name = "vdd_cpu_a710";
-            regulator-min-microvolt = <0xb71b0>;
-            regulator-max-microvolt = <0x124f80>;
+        power-controller@11bc00 {
+            compatible = "mediatek,cpufreq-hw";
+            reg = <0x0 0x11bc10 0x0 0x120 0x0 0x11bd30 0x0 0x120>;
+            reg-names = "performance-domain0", "performance-domain1";
+            phandle = <0x90>;
         };
     };
 };
 """
 
     fun getSampleDtbBytes(): ByteArray {
-        val parser = DtsParser()
-        val compiler = FdtBinaryCompiler()
-        val parsed = parser.parse(SAMPLE_DTS)
-        return compiler.compile(parsed.rootNode, parsed.reservations)
+        val parseResult = DtsParser().parse(SAMPLE_DTS)
+        return FdtBinaryCompiler().compile(parseResult.rootNode, parseResult.reservations)
     }
 }

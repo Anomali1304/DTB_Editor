@@ -7,238 +7,153 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dtb.editor.dtc.DtcEngine
 import com.dtb.editor.dtc.DtcEngineImpl
-import com.dtb.editor.fdt.SampleDtbProvider
 import com.dtb.editor.fdt.cpu.ClusterConfig
 import com.dtb.editor.fdt.cpu.CpuTopologyManager
 import com.dtb.editor.fdt.cpu.CpuTopologyState
+import com.dtb.editor.fdt.cpu.TopologyPlan
 import com.dtb.editor.fdt.cpu.TopologyPreviewResult
-import com.dtb.editor.fdt.diff.DiffSummary
-import com.dtb.editor.fdt.diff.DtsDiffEngine
-import com.dtb.editor.fdt.diff.TreeComparator
-import com.dtb.editor.fdt.diff.TreeComparisonResult
-import com.dtb.editor.fdt.model.CompilationOutput
-import com.dtb.editor.fdt.model.DtbFileType
 import com.dtb.editor.fdt.model.FdtNode
-import com.dtb.editor.fdt.model.FdtReserveEntry
-import com.dtb.editor.fdt.parser.DtTableContainer
-import com.dtb.editor.fdt.parser.DtTableParser
+import com.dtb.editor.fdt.parser.DtbEntryItem
+import com.dtb.editor.fdt.parser.DtbPayloadHelper
+import com.dtb.editor.fdt.parser.DtbPayloadStructure
 import com.dtb.editor.fdt.parser.DtsFormatter
 import com.dtb.editor.fdt.parser.DtsParser
-import com.dtb.editor.fdt.parser.FdtBinaryCompiler
-import com.dtb.editor.fdt.parser.FdtBinaryParser
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
+import com.dtb.editor.fdt.parser.VendorBoot
+import com.dtb.editor.fdt.parser.VendorBootException
+import com.dtb.editor.fdt.parser.VendorBootImage
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.security.MessageDigest
 
-data class ActiveWorkspace(
+enum class InputFileType(val defaultExtension: String) {
+    VENDOR_BOOT("img"),
+    DT_TABLE("dtb"),
+    RAW_FDT("dtb")
+}
+
+enum class AppTab {
+    CPU,
+    DTS
+}
+
+data class OpenFileState(
     val fileName: String,
-    val fileType: DtbFileType,
-    val originalSizeBytes: Long,
-    val originalSourceText: String,
-    val importedSourceText: String,
-    val sourceText: String,
-    val originalBytes: ByteArray? = null,
-    val isDirty: Boolean = false,
-    val parsedAst: FdtNode? = null,
-    val dtTableContainer: DtTableContainer? = null,
-    val selectedDtEntryIndex: Int = 0
+    val fileType: InputFileType,
+    val originalBytes: ByteArray,
+    val hasAvbFooter: Boolean,
+    val vendorBootImage: VendorBootImage? = null,
+    val dtbPayloadStructure: DtbPayloadStructure,
+    val dtbEntries: List<DtbEntryItem>,
+    val selectedEntryIndex: Int,
+    val originalDtsText: String,
+    val currentDtsText: String,
+    val parsedAst: FdtNode,
+    val cpuTopology: CpuTopologyState
 )
 
-enum class WorkspaceTab {
-    SOURCE,
-    TREE,
-    BINARY,
-    TOPOLOGY,
-    COMPARE,
-    DIAGNOSTICS
-}
-
-enum class ExportTargetType {
-    EDITED_DTS,
-    RAW_COMPILED_DTB,
-    REBUILT_DT_TABLE,
-    ORIGINAL_DTB,
-    DIFF_REPORT
-}
+data class PendingMultiDtb(
+    val fileName: String,
+    val fileType: InputFileType,
+    val originalBytes: ByteArray,
+    val hasAvbFooter: Boolean,
+    val vendorBootImage: VendorBootImage? = null,
+    val dtbPayloadStructure: DtbPayloadStructure,
+    val dtbEntries: List<DtbEntryItem>
+)
 
 class DtbViewModel(
     private val dtcEngine: DtcEngine = DtcEngineImpl(),
     private val topologyManager: CpuTopologyManager = CpuTopologyManager(),
-    private val diffEngine: DtsDiffEngine = DtsDiffEngine(),
-    private val dtTableParser: DtTableParser = DtTableParser(),
-    private val treeComparator: TreeComparator = TreeComparator()
+    private val vendorBoot: VendorBoot = VendorBoot(),
+    private val dtbPayloadHelper: DtbPayloadHelper = DtbPayloadHelper()
 ) : ViewModel() {
 
-    private val _workspace = MutableStateFlow<ActiveWorkspace?>(null)
-    val workspace: StateFlow<ActiveWorkspace?> = _workspace.asStateFlow()
+    private val _openFileState = MutableStateFlow<OpenFileState?>(null)
+    val openFileState: StateFlow<OpenFileState?> = _openFileState.asStateFlow()
 
-    private val _activeTab = MutableStateFlow(WorkspaceTab.SOURCE)
-    val activeTab: StateFlow<WorkspaceTab> = _activeTab.asStateFlow()
+    private val _pendingMultiDtb = MutableStateFlow<PendingMultiDtb?>(null)
+    val pendingMultiDtb: StateFlow<PendingMultiDtb?> = _pendingMultiDtb.asStateFlow()
+
+    private val _activeTab = MutableStateFlow(AppTab.CPU)
+    val activeTab: StateFlow<AppTab> = _activeTab.asStateFlow()
 
     private val _isProcessing = MutableStateFlow(false)
     val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
 
-    private val _statusMessage = MutableStateFlow("Ready. Import a DTS, DTB, or Android DT Table file.")
-    val statusMessage: StateFlow<String> = _statusMessage.asStateFlow()
+    private val _snackbarMessage = MutableSharedFlow<String>()
+    val snackbarMessage: SharedFlow<String> = _snackbarMessage.asSharedFlow()
 
-    private val _compilerOutput = MutableStateFlow<CompilationOutput?>(null)
-    val compilerOutput: StateFlow<CompilationOutput?> = _compilerOutput.asStateFlow()
-
-    private val _cpuTopology = MutableStateFlow<CpuTopologyState?>(null)
-    val cpuTopology: StateFlow<CpuTopologyState?> = _cpuTopology.asStateFlow()
-
-    private val _diffSummary = MutableStateFlow<DiffSummary?>(null)
-    val diffSummary: StateFlow<DiffSummary?> = _diffSummary.asStateFlow()
-
-    private val _diagnosticsLog = MutableStateFlow<List<String>>(emptyList())
-    val diagnosticsLog: StateFlow<List<String>> = _diagnosticsLog.asStateFlow()
-
-    private val undoStack = mutableListOf<String>()
-    private val redoStack = mutableListOf<String>()
-
-    private var debounceParseJob: Job? = null
-
-    fun selectTab(tab: WorkspaceTab) {
+    fun selectTab(tab: AppTab) {
         _activeTab.value = tab
     }
 
-    fun loadSampleFile() {
+    fun openUri(uri: Uri, context: Context) {
         viewModelScope.launch {
             _isProcessing.value = true
-            _statusMessage.value = "Decompiling sample Qualcomm SM8450 DTB..."
-
             withContext(Dispatchers.IO) {
                 try {
-                    val sampleBytes = SampleDtbProvider.getSampleDtbBytes()
-                    val decompileRes = dtcEngine.decompileBytes(sampleBytes).getOrThrow()
-                    val ast = DtsParser().parse(decompileRes.dtsText).rootNode
-
-                    val ws = ActiveWorkspace(
-                        fileName = "sample_sm8450.dtb",
-                        fileType = DtbFileType.DTB,
-                        originalSizeBytes = sampleBytes.size.toLong(),
-                        originalSourceText = decompileRes.dtsText,
-                        importedSourceText = decompileRes.dtsText,
-                        sourceText = decompileRes.dtsText,
-                        originalBytes = sampleBytes,
-                        isDirty = false,
-                        parsedAst = ast
-                    )
-
-                    _workspace.value = ws
-                    _cpuTopology.value = topologyManager.extractTopology(ast)
-                    _diffSummary.value = diffEngine.compareNodes(ast, ast)
-                    _activeTab.value = WorkspaceTab.SOURCE
-                    _statusMessage.value = "Loaded sample_sm8450.dtb (${ast.totalNodesCount} nodes)"
-                    val roundtripLogs = verifyImportRoundtrip(ast)
-                    _diagnosticsLog.value = listOf(decompileRes.log) + roundtripLogs
-                } catch (e: Exception) {
-                    _statusMessage.value = "Sample load error: ${e.message}"
-                } finally {
-                    _isProcessing.value = false
-                }
-            }
-        }
-    }
-
-    fun importUri(uri: Uri, context: Context) {
-        viewModelScope.launch {
-            _isProcessing.value = true
-            _statusMessage.value = "Reading imported file..."
-
-            withContext(Dispatchers.IO) {
-                try {
-                    val (fileName, size) = queryFileInfo(context, uri)
+                    val fileName = queryFileName(context, uri)
                     val inputStream = context.contentResolver.openInputStream(uri)
-                        ?: throw Exception("Cannot open file stream for: $uri")
-
+                        ?: throw Exception("Gagal membuka stream file")
                     val bytes = inputStream.use { it.readBytes() }
-                    val logs = mutableListOf<String>()
-
-                    val ws = if (dtTableParser.isDtTable(bytes)) {
-                        // 1. Android DT Table Container Image (0xd7b7ab1e)
-                        val container = dtTableParser.parse(bytes)
-                        val header = container.header
-                        logs.add("[Android DT Table] Loaded DT Table Image (${bytes.size} B)")
-                        logs.add("[Header] TotalSize=${header.totalSize}, Entries=${header.dtEntryCount}, PageSize=${header.pageSize}, Version=${header.version}")
-
-                        for (e in container.entries) {
-                            logs.add("  - Entry ${e.index}: Offset=${e.dtOffset}, Size=${e.dtSize} B, ID=0x${e.id.toString(16)}, REV=0x${e.rev.toString(16)}")
-                        }
-
-                        val initialEntry = container.entries.first()
-                        val decompileRes = dtcEngine.decompileBytes(initialEntry.fdtBytes).getOrThrow()
-                        logs.add(decompileRes.log)
-                        logs.addAll(verifyImportRoundtrip(decompileRes.rootNode))
-
-                        ActiveWorkspace(
-                            fileName = fileName,
-                            fileType = DtbFileType.DT_TABLE,
-                            originalSizeBytes = bytes.size.toLong(),
-                            originalSourceText = decompileRes.dtsText,
-                            importedSourceText = decompileRes.dtsText,
-                            sourceText = decompileRes.dtsText,
-                            originalBytes = bytes,
-                            isDirty = false,
-                            parsedAst = decompileRes.rootNode,
-                            dtTableContainer = container,
-                            selectedDtEntryIndex = 0
-                        )
-                    } else if (bytes.size >= 4 && isDtbMagic(bytes)) {
-                        // 2. Raw FDT Binary (0xd00dfeed)
-                        val fileType = if (fileName.endsWith(".dtbo", ignoreCase = true)) DtbFileType.DTBO else DtbFileType.DTB
-                        val decompileRes = dtcEngine.decompileBytes(bytes).getOrThrow()
-                        logs.add(decompileRes.log)
-                        logs.addAll(verifyImportRoundtrip(decompileRes.rootNode))
-
-                        ActiveWorkspace(
-                            fileName = fileName,
-                            fileType = fileType,
-                            originalSizeBytes = bytes.size.toLong(),
-                            originalSourceText = decompileRes.dtsText,
-                            importedSourceText = decompileRes.dtsText,
-                            sourceText = decompileRes.dtsText,
-                            originalBytes = bytes,
-                            isDirty = false,
-                            parsedAst = decompileRes.rootNode
-                        )
-                    } else {
-                        // 3. Raw DTS Source Text
-                        val dtsText = String(bytes, Charsets.UTF_8)
-                        val parseResult = DtsParser().parse(dtsText)
-                        logs.add("[DTS Import] Loaded $fileName (${bytes.size} B)")
-                        if (parseResult.warnings.isNotEmpty()) {
-                            logs.addAll(parseResult.warnings.map { "WARNING: $it" })
-                        }
-                        logs.addAll(verifyImportRoundtrip(parseResult.rootNode, parseResult.reservations))
-
-                        ActiveWorkspace(
-                            fileName = fileName,
-                            fileType = DtbFileType.DTS,
-                            originalSizeBytes = bytes.size.toLong(),
-                            originalSourceText = dtsText,
-                            importedSourceText = dtsText,
-                            sourceText = dtsText,
-                            originalBytes = null,
-                            isDirty = false,
-                            parsedAst = parseResult.rootNode
-                        )
+                    if (bytes.size < 4) {
+                        _snackbarMessage.emit("Format file tidak dikenali")
+                        return@withContext
                     }
 
-                    _workspace.value = ws
-                    _cpuTopology.value = topologyManager.extractTopology(ws.parsedAst ?: FdtNode("/", "/"))
-                    _diffSummary.value = diffEngine.compareNodes(ws.parsedAst ?: FdtNode("/", "/"), ws.parsedAst ?: FdtNode("/", "/"))
-                    _diagnosticsLog.value = logs
-                    _activeTab.value = WorkspaceTab.SOURCE
-                    _statusMessage.value = "Opened $fileName (${ws.fileType.displayName})"
+                    if (VendorBoot.isVendorBoot(bytes)) {
+                        val image = vendorBoot.parse(bytes)
+                        val (structure, entries) = dtbPayloadHelper.parseStructure(image.dtbBytes)
+                        if (entries.size > 1) {
+                            _pendingMultiDtb.value = PendingMultiDtb(
+                                fileName = fileName,
+                                fileType = InputFileType.VENDOR_BOOT,
+                                originalBytes = bytes,
+                                hasAvbFooter = image.hasAvbFooter,
+                                vendorBootImage = image,
+                                dtbPayloadStructure = structure,
+                                dtbEntries = entries
+                            )
+                        } else {
+                            loadEntryDirect(fileName, InputFileType.VENDOR_BOOT, bytes, image.hasAvbFooter, image, structure, entries, 0)
+                        }
+                        return@withContext
+                    }
+
+                    // Check DT table or FDT magic
+                    try {
+                        val (structure, entries) = dtbPayloadHelper.parseStructure(bytes)
+                        val fileType = if (structure is DtbPayloadStructure.AndroidDtTable) {
+                            InputFileType.DT_TABLE
+                        } else {
+                            InputFileType.RAW_FDT
+                        }
+
+                        if (entries.size > 1) {
+                            _pendingMultiDtb.value = PendingMultiDtb(
+                                fileName = fileName,
+                                fileType = fileType,
+                                originalBytes = bytes,
+                                hasAvbFooter = false,
+                                vendorBootImage = null,
+                                dtbPayloadStructure = structure,
+                                dtbEntries = entries
+                            )
+                        } else {
+                            loadEntryDirect(fileName, fileType, bytes, false, null, structure, entries, 0)
+                        }
+                    } catch (_: Exception) {
+                        _snackbarMessage.emit("Format file tidak dikenali")
+                    }
                 } catch (e: Exception) {
-                    _statusMessage.value = "Import error: ${e.message}"
-                    _diagnosticsLog.value = listOf("ERROR: ${e.message}")
+                    _snackbarMessage.emit(e.message ?: "Gagal membuka file")
                 } finally {
                     _isProcessing.value = false
                 }
@@ -246,36 +161,25 @@ class DtbViewModel(
         }
     }
 
-    fun selectDtTableEntry(entryIndex: Int) {
-        val current = _workspace.value ?: return
-        val container = current.dtTableContainer ?: return
-        if (entryIndex !in container.entries.indices) return
-
+    fun selectDtbEntry(index: Int) {
+        val pending = _pendingMultiDtb.value ?: return
         viewModelScope.launch {
             _isProcessing.value = true
             withContext(Dispatchers.IO) {
                 try {
-                    val entry = container.entries[entryIndex]
-                    val decompileRes = dtcEngine.decompileBytes(entry.fdtBytes).getOrThrow()
-
-                    val logs = _diagnosticsLog.value.toMutableList()
-                    logs.add("[DT Table] Switched to Entry $entryIndex (ID=0x${entry.id.toString(16)}, Size=${entry.dtSize} B)")
-                    logs.addAll(verifyImportRoundtrip(decompileRes.rootNode))
-
-                    _workspace.value = current.copy(
-                        selectedDtEntryIndex = entryIndex,
-                        originalSourceText = decompileRes.dtsText,
-                        importedSourceText = decompileRes.dtsText,
-                        sourceText = decompileRes.dtsText,
-                        isDirty = false,
-                        parsedAst = decompileRes.rootNode
+                    loadEntryDirect(
+                        pending.fileName,
+                        pending.fileType,
+                        pending.originalBytes,
+                        pending.hasAvbFooter,
+                        pending.vendorBootImage,
+                        pending.dtbPayloadStructure,
+                        pending.dtbEntries,
+                        index
                     )
-                    _cpuTopology.value = topologyManager.extractTopology(decompileRes.rootNode)
-                    _diffSummary.value = diffEngine.compareNodes(decompileRes.rootNode, decompileRes.rootNode)
-                    _diagnosticsLog.value = logs
-                    _statusMessage.value = "Switched to DT Table Entry $entryIndex"
+                    _pendingMultiDtb.value = null
                 } catch (e: Exception) {
-                    _statusMessage.value = "Error switching entry: ${e.message}"
+                    _snackbarMessage.emit(e.message ?: "Gagal memuat entri DTB")
                 } finally {
                     _isProcessing.value = false
                 }
@@ -283,98 +187,68 @@ class DtbViewModel(
         }
     }
 
-    fun updateSourceText(newText: String) {
-        val current = _workspace.value ?: return
-        if (current.sourceText != newText) {
-            undoStack.add(current.sourceText)
-            redoStack.clear()
-            val isDirty = newText != current.originalSourceText
-            _workspace.value = current.copy(sourceText = newText, isDirty = isDirty)
+    fun cancelMultiDtbSelection() {
+        _pendingMultiDtb.value = null
+    }
 
-            debounceParseJob?.cancel()
-            debounceParseJob = viewModelScope.launch(Dispatchers.Default) {
-                delay(300)
+    private fun loadEntryDirect(
+        fileName: String,
+        fileType: InputFileType,
+        originalBytes: ByteArray,
+        hasAvbFooter: Boolean,
+        vendorBootImage: VendorBootImage?,
+        structure: DtbPayloadStructure,
+        entries: List<DtbEntryItem>,
+        selectedIndex: Int
+    ) {
+        val selectedFdt = entries[selectedIndex].fdtBytes
+        val decompileRes = dtcEngine.decompileBytes(selectedFdt).getOrThrow()
+        val ast = decompileRes.rootNode
+        val topology = topologyManager.extractTopology(ast)
+
+        _openFileState.value = OpenFileState(
+            fileName = fileName,
+            fileType = fileType,
+            originalBytes = originalBytes,
+            hasAvbFooter = hasAvbFooter,
+            vendorBootImage = vendorBootImage,
+            dtbPayloadStructure = structure,
+            dtbEntries = entries,
+            selectedEntryIndex = selectedIndex,
+            originalDtsText = decompileRes.dtsText,
+            currentDtsText = decompileRes.dtsText,
+            parsedAst = ast,
+            cpuTopology = topology
+        )
+        _activeTab.value = AppTab.CPU
+    }
+
+    fun updateDtsText(newText: String) {
+        val current = _openFileState.value ?: return
+        if (current.currentDtsText == newText) return
+        val parsed = DtsParser().parse(newText)
+        val topology = topologyManager.extractTopology(parsed.rootNode)
+        _openFileState.value = current.copy(
+            currentDtsText = newText,
+            parsedAst = parsed.rootNode,
+            cpuTopology = topology
+        )
+    }
+
+    fun applyCustomPlan(clusterConfigs: List<ClusterConfig>, syncCpufreq: Boolean) {
+        val current = _openFileState.value ?: return
+        viewModelScope.launch {
+            _isProcessing.value = true
+            withContext(Dispatchers.Default) {
                 try {
-                    val parsed = DtsParser().parse(newText)
-                    val origAst = DtsParser().parse(current.originalSourceText).rootNode
-                    _workspace.value = _workspace.value?.copy(parsedAst = parsed.rootNode)
-                    _cpuTopology.value = topologyManager.extractTopology(parsed.rootNode)
-                    _diffSummary.value = diffEngine.compareNodes(origAst, parsed.rootNode)
-                } catch (_: Exception) {
-                }
-            }
-        }
-    }
-
-    fun undo() {
-        if (undoStack.isEmpty()) return
-        val current = _workspace.value ?: return
-        redoStack.add(current.sourceText)
-        val prev = undoStack.removeAt(undoStack.lastIndex)
-        _workspace.value = current.copy(sourceText = prev, isDirty = (prev != current.originalSourceText))
-        updateSourceText(prev)
-    }
-
-    fun redo() {
-        if (redoStack.isEmpty()) return
-        val current = _workspace.value ?: return
-        undoStack.add(current.sourceText)
-        val next = redoStack.removeAt(redoStack.lastIndex)
-        _workspace.value = current.copy(sourceText = next, isDirty = (next != current.originalSourceText))
-        updateSourceText(next)
-    }
-
-    fun compile() {
-        val current = _workspace.value ?: run {
-            _statusMessage.value = "No file open to compile"
-            return
-        }
-
-        viewModelScope.launch {
-            _isProcessing.value = true
-            _statusMessage.value = "Compiling DTS with Device Tree Compiler..."
-
-            withContext(Dispatchers.Default) {
-                val output = dtcEngine.compileDtsText(current.sourceText)
-                _compilerOutput.value = output
-
-                val logs = mutableListOf<String>()
-                logs.add(output.log)
-
-                if (output.success && output.compiledBytes != null) {
-                    // Perform roundtrip structural verification comparison
-                    try {
-                        val origAst = DtsParser().parse(current.originalSourceText).rootNode
-                        val rebuiltAst = FdtBinaryParser().parse(output.compiledBytes).rootNode
-                        val verification = treeComparator.compareTrees(origAst, rebuiltAst)
-                        logs.add(verification.summaryReport())
-                    } catch (e: Exception) {
-                        logs.add("[Verification Error] ${e.message}")
+                    val beforeAst = DtsParser().parse(current.currentDtsText).rootNode
+                    val parsed = DtsParser().parse(current.currentDtsText)
+                    val (success, msg) = topologyManager.applyCustomPlan(parsed.rootNode, clusterConfigs, syncCpufreq)
+                    if (!success) {
+                        _snackbarMessage.emit("Gagal menerapkan topologi: $msg")
+                        return@withContext
                     }
-                }
 
-                _diagnosticsLog.value = logs
-                _isProcessing.value = false
-
-                if (output.success) {
-                    _statusMessage.value = "Compilation Succeeded: ${output.outputSizeBytes} bytes"
-                } else {
-                    _statusMessage.value = "Compilation Failed. See Diagnostics tab."
-                    _activeTab.value = WorkspaceTab.DIAGNOSTICS
-                }
-            }
-        }
-    }
-
-    fun applyCpuPreset(preset: List<Int>, syncCpufreq: Boolean = true) {
-        val current = _workspace.value ?: return
-        viewModelScope.launch {
-            _isProcessing.value = true
-            withContext(Dispatchers.Default) {
-                val beforeAst = DtsParser().parse(current.sourceText).rootNode
-                val parsed = DtsParser().parse(current.sourceText)
-                val (success, msg) = topologyManager.applyPreset(parsed.rootNode, preset, syncCpufreq)
-                if (success) {
                     val formattedDts = DtsFormatter().format(parsed.rootNode, parsed.reservations)
                     val reparsedAfterAst = DtsParser().parse(formattedDts).rootNode
 
@@ -383,148 +257,147 @@ class DtbViewModel(
                     val isolation = topologyManager.engine.verifyTopologyIsolation(beforeAst, reparsedAfterAst, controller?.fullPath)
 
                     if (!isolation.isValid) {
-                        _statusMessage.value = isolation.message
-                        val logs = _diagnosticsLog.value.toMutableList()
-                        logs.add("[ERROR] ${isolation.message}")
-                        _diagnosticsLog.value = logs
-                    } else {
-                        updateSourceText(formattedDts)
-                        _statusMessage.value = "Hanya perubahan topologi yang terdeteksi"
-                        val logs = _diagnosticsLog.value.toMutableList()
-                        logs.add("[Topology Apply] Hanya perubahan topologi yang terdeteksi")
-                        _diagnosticsLog.value = logs
-                        _cpuTopology.value = topologyManager.extractTopology(parsed.rootNode)
+                        _snackbarMessage.emit(isolation.message)
+                        return@withContext
                     }
-                } else {
-                    _statusMessage.value = "Topology Error: $msg"
+
+                    updateDtsText(formattedDts)
+                    _snackbarMessage.emit("Topologi diterapkan ke DTS")
+                } catch (e: Exception) {
+                    _snackbarMessage.emit(e.message ?: "Gagal menerapkan topologi")
+                } finally {
+                    _isProcessing.value = false
                 }
-                _isProcessing.value = false
-            }
-        }
-    }
-
-    fun applyCustomTopologyPlan(clusterConfigs: List<ClusterConfig>, syncCpufreq: Boolean = true) {
-        val current = _workspace.value ?: return
-        viewModelScope.launch {
-            _isProcessing.value = true
-            withContext(Dispatchers.Default) {
-                val beforeAst = DtsParser().parse(current.sourceText).rootNode
-                val parsed = DtsParser().parse(current.sourceText)
-                val (success, msg) = topologyManager.applyCustomPlan(parsed.rootNode, clusterConfigs, syncCpufreq)
-                if (success) {
-                    val formattedDts = DtsFormatter().format(parsed.rootNode, parsed.reservations)
-                    val reparsedAfterAst = DtsParser().parse(formattedDts).rootNode
-
-                    val cores = topologyManager.engine.extractCpuCores(beforeAst)
-                    val controller = topologyManager.engine.discoverPerformanceController(beforeAst, cores)
-                    val isolation = topologyManager.engine.verifyTopologyIsolation(beforeAst, reparsedAfterAst, controller?.fullPath)
-
-                    if (!isolation.isValid) {
-                        _statusMessage.value = isolation.message
-                        val logs = _diagnosticsLog.value.toMutableList()
-                        logs.add("[ERROR] ${isolation.message}")
-                        _diagnosticsLog.value = logs
-                    } else {
-                        updateSourceText(formattedDts)
-                        _statusMessage.value = "Hanya perubahan topologi yang terdeteksi"
-                        val logs = _diagnosticsLog.value.toMutableList()
-                        logs.add("[Topology Apply] Hanya perubahan topologi yang terdeteksi")
-                        _diagnosticsLog.value = logs
-                        _cpuTopology.value = topologyManager.extractTopology(parsed.rootNode)
-                    }
-                } else {
-                    _statusMessage.value = "Topology Error: $msg"
-                }
-                _isProcessing.value = false
             }
         }
     }
 
     fun previewPlan(clusterConfigs: List<ClusterConfig>, syncCpufreq: Boolean): TopologyPreviewResult? {
-        val top = _cpuTopology.value ?: return null
-        return topologyManager.previewPlan(clusterConfigs, top.cores, top.controllerInfo, syncCpufreq)
+        val current = _openFileState.value ?: return null
+        return topologyManager.previewPlan(clusterConfigs, current.cpuTopology.cores, current.cpuTopology.controllerInfo, syncCpufreq)
     }
 
-    fun saveWorkspace() {
-        val current = _workspace.value ?: return
-        _workspace.value = current.copy(originalSourceText = current.sourceText, isDirty = false)
-        _statusMessage.value = "Saved workspace changes."
+    fun prepareSaveBytes(): ByteArray? {
+        val current = _openFileState.value ?: return null
+        return try {
+            if (current.currentDtsText == current.originalDtsText) {
+                return current.originalBytes
+            }
+
+            // 1. Compile modified DTS to FDT binary
+            val compileResult = dtcEngine.compileDtsText(current.currentDtsText)
+            if (!compileResult.success || compileResult.compiledBytes == null) {
+                throw Exception("Kompilasi DTS gagal: ${compileResult.log}")
+            }
+            val newFdtBytes = compileResult.compiledBytes
+
+            // 2. Verify compiled FDT can be decompiled
+            val decompileCheck = dtcEngine.decompileBytes(newFdtBytes)
+            if (decompileCheck.isFailure) {
+                throw Exception("FDT hasil kompilasi tidak dapat di-decompile ulang")
+            }
+
+            // 3. Rebuild DTB block
+            val newDtbBytes = dtbPayloadHelper.rebuild(
+                current.dtbPayloadStructure,
+                current.selectedEntryIndex,
+                newFdtBytes
+            )
+
+            // 4. Output format handling
+            when (current.fileType) {
+                InputFileType.VENDOR_BOOT -> {
+                    val vbImage = current.vendorBootImage
+                        ?: throw Exception("Data header vendor_boot tidak tersedia")
+                    val repacked = vendorBoot.repackToBytes(current.originalBytes, vbImage, newDtbBytes)
+
+                    // In-memory repack verification
+                    val verifyParsed = vendorBoot.parse(repacked)
+                    val md = MessageDigest.getInstance("SHA-256")
+                    val origRamdiskSha = vbImage.ramdiskSha256
+                    val newRamdiskSha = verifyParsed.ramdiskSha256
+                    if (!origRamdiskSha.contentEquals(newRamdiskSha)) {
+                        throw Exception("Verifikasi integritas ramdisk gagal")
+                    }
+
+                    if (vbImage.header.headerVersion >= 4) {
+                        if (vbImage.ramdiskTableSha256 != null && !vbImage.ramdiskTableSha256.contentEquals(verifyParsed.ramdiskTableSha256)) {
+                            throw Exception("Verifikasi ramdisk table gagal")
+                        }
+                        if (vbImage.bootconfigSha256 != null && !vbImage.bootconfigSha256.contentEquals(verifyParsed.bootconfigSha256)) {
+                            throw Exception("Verifikasi bootconfig gagal")
+                        }
+                    }
+
+                    // Verify unedited DTB entries in repacked image
+                    val (_, repackedEntries) = dtbPayloadHelper.parseStructure(verifyParsed.dtbBytes)
+                    for (i in current.dtbEntries.indices) {
+                        if (i != current.selectedEntryIndex) {
+                            val origEntryBytes = current.dtbEntries[i].fdtBytes
+                            val repackedEntryBytes = repackedEntries.getOrNull(i)?.fdtBytes
+                            if (repackedEntryBytes == null || !origEntryBytes.contentEquals(repackedEntryBytes)) {
+                                throw Exception("Entri DTB lain berubah saat repack")
+                            }
+                        }
+                    }
+
+                    repacked
+                }
+                InputFileType.DT_TABLE -> {
+                    // Verify unedited entries in DT table
+                    val (_, rebuiltEntries) = dtbPayloadHelper.parseStructure(newDtbBytes)
+                    for (i in current.dtbEntries.indices) {
+                        if (i != current.selectedEntryIndex) {
+                            val origEntryBytes = current.dtbEntries[i].fdtBytes
+                            val rebuiltEntryBytes = rebuiltEntries.getOrNull(i)?.fdtBytes
+                            if (rebuiltEntryBytes == null || !origEntryBytes.contentEquals(rebuiltEntryBytes)) {
+                                throw Exception("Entri DTB lain berubah saat rekonstruksi tabel DT")
+                            }
+                        }
+                    }
+                    newDtbBytes
+                }
+                InputFileType.RAW_FDT -> {
+                    if (current.dtbEntries.size > 1) {
+                        val (_, rebuiltEntries) = dtbPayloadHelper.parseStructure(newDtbBytes)
+                        for (i in current.dtbEntries.indices) {
+                            if (i != current.selectedEntryIndex) {
+                                val origEntryBytes = current.dtbEntries[i].fdtBytes
+                                val rebuiltEntryBytes = rebuiltEntries.getOrNull(i)?.fdtBytes
+                                if (rebuiltEntryBytes == null || !origEntryBytes.contentEquals(rebuiltEntryBytes)) {
+                                    throw Exception("Entri FDT lain berubah saat rekonstruksi")
+                                }
+                            }
+                        }
+                    }
+                    newDtbBytes
+                }
+            }
+        } catch (e: Exception) {
+            viewModelScope.launch {
+                _snackbarMessage.emit(e.message ?: "Verifikasi sebelum simpan gagal")
+            }
+            null
+        }
     }
 
-    fun exportFile(context: Context, targetUri: Uri, exportType: ExportTargetType) {
-        val current = _workspace.value ?: return
+    fun writeSavedFile(uri: Uri, context: Context, bytes: ByteArray) {
         viewModelScope.launch {
             _isProcessing.value = true
             withContext(Dispatchers.IO) {
                 try {
-                    val stream = context.contentResolver.openOutputStream(targetUri)
-                        ?: throw Exception("Cannot open stream for: $targetUri")
+                    val stream = context.contentResolver.openOutputStream(uri)
+                        ?: throw Exception("Gagal membuka file tujuan simpan")
+                    stream.use { it.write(bytes) }
 
-                    stream.use { out ->
-                        when (exportType) {
-                            ExportTargetType.EDITED_DTS -> {
-                                out.write(current.sourceText.toByteArray(Charsets.UTF_8))
-                            }
-
-                            ExportTargetType.RAW_COMPILED_DTB -> {
-                                val bytes = if (current.sourceText == current.importedSourceText && current.originalBytes != null && current.fileType != DtbFileType.DT_TABLE) {
-                                    current.originalBytes
-                                } else {
-                                    val output = dtcEngine.compileDtsText(current.sourceText)
-                                    if (!output.success || output.compiledBytes == null) {
-                                        throw Exception("Compilation failed: Cannot export corrupt FDT")
-                                    }
-                                    if (current.sourceText != current.importedSourceText && current.originalBytes != null) {
-                                        val origHash = java.security.MessageDigest.getInstance("SHA-256").digest(current.originalBytes)
-                                        val newHash = java.security.MessageDigest.getInstance("SHA-256").digest(output.compiledBytes)
-                                        if (origHash.contentEquals(newHash)) {
-                                            throw Exception("Export Error: Compiled binary is identical to original stock file despite source edits!")
-                                        }
-                                    }
-                                    output.compiledBytes
-                                }
-                                out.write(bytes)
-                            }
-
-                            ExportTargetType.REBUILT_DT_TABLE -> {
-                                val container = current.dtTableContainer
-                                    ?: throw Exception("Current workspace was not imported from an Android DT Table container image")
-
-                                val fdtBytesToUse = if (current.sourceText == current.importedSourceText) {
-                                    container.entries[current.selectedDtEntryIndex].fdtBytes
-                                } else {
-                                    val output = dtcEngine.compileDtsText(current.sourceText)
-                                    if (!output.success || output.compiledBytes == null) {
-                                        throw Exception("Compilation failed: Cannot rebuild DT Table container with invalid FDT")
-                                    }
-                                    output.compiledBytes
-                                }
-
-                                val rebuiltContainerBytes = dtTableParser.rebuild(
-                                    container = container,
-                                    updatedEntryIndex = current.selectedDtEntryIndex,
-                                    newFdtBytes = fdtBytesToUse
-                                )
-                                out.write(rebuiltContainerBytes)
-                            }
-
-                            ExportTargetType.ORIGINAL_DTB -> {
-                                val bytes = current.originalBytes
-                                    ?: FdtBinaryCompiler().compile(
-                                        DtsParser().parse(current.originalSourceText).rootNode
-                                    )
-                                out.write(bytes)
-                            }
-
-                            ExportTargetType.DIFF_REPORT -> {
-                                val report = buildDiffReport(current)
-                                out.write(report.toByteArray(Charsets.UTF_8))
-                            }
-                        }
+                    // Mark as clean
+                    val current = _openFileState.value
+                    if (current != null) {
+                        _openFileState.value = current.copy(originalDtsText = current.currentDtsText)
                     }
-                    _statusMessage.value = "Exported file to target destination"
+                    _snackbarMessage.emit("File berhasil disimpan")
                 } catch (e: Exception) {
-                    _statusMessage.value = "Export failed: ${e.message}"
+                    _snackbarMessage.emit(e.message ?: "Gagal menyimpan file")
                 } finally {
                     _isProcessing.value = false
                 }
@@ -532,69 +405,33 @@ class DtbViewModel(
         }
     }
 
-    private fun buildDiffReport(ws: ActiveWorkspace): String {
-        val diff = _diffSummary.value ?: return "No diff summary."
-        return buildString {
-            appendLine("=== DTB Studio Workspace Diff Report ===")
-            appendLine("File: ${ws.fileName}")
-            appendLine("Type: ${ws.fileType.displayName}")
-            if (ws.dtTableContainer != null) {
-                appendLine("Selected DT Entry Index: ${ws.selectedDtEntryIndex}")
-            }
-            appendLine("Summary: +${diff.addedCount} added, -${diff.removedCount} removed, ~${diff.modifiedCount} modified\n")
-            for (item in diff.items) {
-                appendLine("[${item.type}] ${item.path}")
-                appendLine("  ${item.description}")
-                if (item.details.isNotEmpty()) appendLine("  ${item.details}")
-                appendLine()
-            }
+    fun closeFile() {
+        _openFileState.value = null
+        _pendingMultiDtb.value = null
+    }
+
+    fun getSuggestedFileName(): String {
+        val current = _openFileState.value ?: return "output.dtb"
+        val rawName = current.fileName
+        val dotIdx = rawName.lastIndexOf('.')
+        return if (dotIdx > 0) {
+            val base = rawName.substring(0, dotIdx)
+            val ext = rawName.substring(dotIdx + 1)
+            "${base}_mod.$ext"
+        } else {
+            "${rawName}_mod.${current.fileType.defaultExtension}"
         }
     }
 
-    private fun isDtbMagic(bytes: ByteArray): Boolean {
-        if (bytes.size < 4) return false
-        val magic = ((bytes[0].toInt() and 0xFF) shl 24) or
-                ((bytes[1].toInt() and 0xFF) shl 16) or
-                ((bytes[2].toInt() and 0xFF) shl 8) or
-                (bytes[3].toInt() and 0xFF)
-        return magic == 0xd00dfeed.toInt()
-    }
-
-    private fun queryFileInfo(context: Context, uri: Uri): Pair<String, Long> {
-        var name = "device_tree.dts"
-        var size = 0L
+    private fun queryFileName(context: Context, uri: Uri): String {
+        var name = "file"
         val cursor = context.contentResolver.query(uri, null, null, null, null)
         cursor?.use {
             if (it.moveToFirst()) {
-                val nameIdx = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                val sizeIdx = it.getColumnIndex(OpenableColumns.SIZE)
-                if (nameIdx != -1) name = it.getString(nameIdx) ?: name
-                if (sizeIdx != -1) size = it.getLong(sizeIdx)
+                val idx = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (idx != -1) name = it.getString(idx) ?: name
             }
         }
-        return Pair(name, size)
-    }
-
-    private fun verifyImportRoundtrip(origRoot: FdtNode, reservations: List<FdtReserveEntry> = emptyList()): List<String> {
-        val verificationLogs = mutableListOf<String>()
-        try {
-            val formattedDts = DtsFormatter().format(origRoot, reservations)
-            val compileResult = dtcEngine.compileDtsText(formattedDts)
-            if (!compileResult.success || compileResult.compiledBytes == null) {
-                verificationLogs.add("Roundtrip compilation error: ${compileResult.log}")
-                return verificationLogs
-            }
-            val reparsedRoot = FdtBinaryParser().parse(compileResult.compiledBytes).rootNode
-            val comparison = treeComparator.compareTrees(origRoot, reparsedRoot)
-            if (!comparison.isExactMatch) {
-                val diffPaths = (comparison.missingNodes + comparison.missingProperties + comparison.changedProperties + comparison.structuralDifferences)
-                verificationLogs.add("Roundtrip tidak identik: ${diffPaths.joinToString(", ")}")
-            } else {
-                verificationLogs.add("[Roundtrip] Identik: 0 data loss (${origRoot.totalNodesCount} nodes, ${origRoot.totalPropertiesCount} properties)")
-            }
-        } catch (e: Exception) {
-            verificationLogs.add("Roundtrip verification error: ${e.message}")
-        }
-        return verificationLogs
+        return name
     }
 }

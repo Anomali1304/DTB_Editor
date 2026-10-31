@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "DTB Studio"
+rootProject.name = "DTB Editor"
 
 include(":app")
