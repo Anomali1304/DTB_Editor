@@ -12,9 +12,13 @@ import java.nio.ByteOrder
 class TopologyEngine {
 
     /**
-     * Validates a cluster plan against system total CPU count.
+     * Validates a cluster plan against system total CPU count and available domain slots.
      */
-    fun validatePlan(clusterConfigs: List<ClusterConfig>, totalCpus: Int): TopologyPlan {
+    fun validatePlan(
+        clusterConfigs: List<ClusterConfig>,
+        totalCpus: Int,
+        maxClusters: Int? = null
+    ): TopologyPlan {
         val errors = mutableListOf<String>()
         val warnings = mutableListOf<String>()
 
@@ -28,9 +32,19 @@ class TopologyEngine {
             return TopologyPlan(clusterConfigs, errors = errors)
         }
 
+        if (maxClusters != null && clusterConfigs.size > maxClusters) {
+            errors.add("Requested cluster count (${clusterConfigs.size}) exceeds available cpufreq performance domain slots (slot hanya $maxClusters)")
+        }
+
+        // Sort clusters by clusterIndex and renumber to 0..n-1
+        val sortedConfigs = clusterConfigs.sortedBy { it.clusterIndex }
+        val normalizedConfigs = sortedConfigs.mapIndexed { newIdx, config ->
+            config.copy(clusterIndex = newIdx)
+        }
+
         val assignedCpuSet = mutableSetOf<Int>()
 
-        for ((idx, cluster) in clusterConfigs.withIndex()) {
+        for ((idx, cluster) in normalizedConfigs.withIndex()) {
             if (cluster.cpuIndices.isEmpty()) {
                 errors.add("Cluster $idx (${cluster.clusterIndex}) cannot be empty")
             }
@@ -50,13 +64,25 @@ class TopologyEngine {
             errors.add("Unassigned CPUs detected: ${unassignedCpus.joinToString()}")
         }
 
-        return TopologyPlan(clusterConfigs, warnings = warnings, errors = errors)
+        return TopologyPlan(normalizedConfigs, warnings = warnings, errors = errors)
+    }
+
+    fun validatePlan(
+        clusterConfigs: List<ClusterConfig>,
+        totalCpus: Int,
+        controllerInfo: PerformanceControllerInfo?
+    ): TopologyPlan {
+        return validatePlan(clusterConfigs, totalCpus, controllerInfo?.availableSlots?.size)
     }
 
     /**
      * Creates a default cluster plan given cluster sizes (e.g. [2, 3, 3] for 8 CPUs).
      */
-    fun createPlanFromSizes(sizes: List<Int>, totalCpus: Int): TopologyPlan {
+    fun createPlanFromSizes(
+        sizes: List<Int>,
+        totalCpus: Int,
+        maxClusters: Int? = null
+    ): TopologyPlan {
         val configs = mutableListOf<ClusterConfig>()
         var currentCpu = 0
         for ((cIdx, size) in sizes.withIndex()) {
@@ -64,7 +90,77 @@ class TopologyEngine {
             configs.add(ClusterConfig(cIdx, cpus))
             currentCpu += size
         }
-        return validatePlan(configs, totalCpus)
+        return validatePlan(configs, totalCpus, maxClusters)
+    }
+
+    fun createPlanFromSizes(
+        sizes: List<Int>,
+        totalCpus: Int,
+        controllerInfo: PerformanceControllerInfo?
+    ): TopologyPlan {
+        return createPlanFromSizes(sizes, totalCpus, controllerInfo?.availableSlots?.size)
+    }
+
+    /**
+     * Calculates a live preview of the topology plan with assigned slots, validation errors, and warnings.
+     */
+    fun previewPlan(
+        clusterConfigs: List<ClusterConfig>,
+        cpuCores: List<CpuCoreDetail>,
+        controllerInfo: PerformanceControllerInfo?,
+        syncCpufreq: Boolean
+    ): TopologyPreviewResult {
+        val maxClusters = if (syncCpufreq) controllerInfo?.availableSlots?.size else null
+        val plan = validatePlan(clusterConfigs, cpuCores.size, maxClusters).copy(syncCpufreq = syncCpufreq)
+        val errors = plan.errors.toMutableList()
+        val warnings = mutableListOf<String>()
+        var assignedSlots = emptyMap<Int, Long>()
+        val duplicateSlots = mutableSetOf<Long>()
+
+        if (syncCpufreq && controllerInfo != null) {
+            // Check for duplicate manual slot selections
+            val manualSelections = clusterConfigs.mapNotNull { it.selectedDomainSlot }
+            val dupes = manualSelections.groupingBy { it }.eachCount().filter { it.value > 1 }.keys
+            if (dupes.isNotEmpty()) {
+                duplicateSlots.addAll(dupes)
+                errors.add("Slot yang sama (${dupes.joinToString { "0x" + it.toString(16) }}) dipilih oleh lebih dari satu cluster")
+            }
+
+            if (clusterConfigs.size > controllerInfo.availableSlots.size) {
+                val limit = controllerInfo.availableSlots.size
+                if (!errors.any { it.contains("slot hanya $limit") }) {
+                    errors.add("Requested cluster count (${clusterConfigs.size}) exceeds available cpufreq performance domain slots (slot hanya $limit)")
+                }
+            }
+
+            if (errors.isEmpty()) {
+                try {
+                    assignedSlots = assignDomainSlots(plan.clusters, cpuCores, controllerInfo)
+                } catch (e: Exception) {
+                    errors.add(e.message ?: "Gagal menentukan slot domain")
+                }
+            }
+        }
+
+        warnings.addAll(generateWarnings(plan.clusters, cpuCores, controllerInfo))
+
+        val summary = buildString {
+            append("Topologi: ${plan.clusters.size} cluster (${plan.clusters.map { it.cpuIndices.size }.joinToString("+")})")
+            if (syncCpufreq && controllerInfo != null) {
+                append(" | ${assignedSlots.size} domain cpufreq")
+            } else {
+                append(" | mode cpu-map saja")
+            }
+        }
+
+        return TopologyPreviewResult(
+            plan = plan.copy(errors = errors, warnings = warnings),
+            assignedSlots = assignedSlots,
+            duplicateSlots = duplicateSlots,
+            warnings = warnings,
+            errors = errors,
+            summary = summary
+        )
     }
 
     /**
@@ -194,10 +290,15 @@ class TopologyEngine {
             0x120L
         }
 
+        val firstSlotAddr = existingSlots[0].first
+        val slotSize = existingSlots[0].second.coerceAtLeast(0x120L)
+
         // Check cpuhvfs node
         val cpuhvfsNode = findCpuhvfsNode(rootNode)
         var maxDomainsAllowed = 16
-        var csramEnd = existingSlots[0].first + (stride * 16)
+        var csramBase: Long? = null
+        var csramSize: Long? = null
+        val diagnostics = mutableListOf<String>()
 
         if (cpuhvfsNode != null) {
             val tblOffProp = cpuhvfsNode.findProperty("tbl-off")
@@ -212,23 +313,44 @@ class TopologyEngine {
 
             val csramReg = cpuhvfsNode.findProperty("reg")
             if (csramReg != null) {
+                val cpuhvfsParent = findParentNode(rootNode, cpuhvfsNode)
+                val cpuhvfsAddrCells = cpuhvfsParent?.findProperty("#address-cells")?.asSingleU32()?.toInt() ?: addrCells
+                val cpuhvfsSizeCells = cpuhvfsParent?.findProperty("#size-cells")?.asSingleU32()?.toInt() ?: sizeCells
+                val cpuhvfsCellWidth = cpuhvfsAddrCells + cpuhvfsSizeCells
+
                 val csramU32s = csramReg.asU32List()
-                if (csramU32s.size >= regCellWidth) {
-                    val csramBase = parseCellsValue(csramU32s, 0, addrCells)
-                    val csramSize = parseCellsValue(csramU32s, addrCells, sizeCells)
-                    csramEnd = csramBase + csramSize
+                var offset = 0
+                while (offset + cpuhvfsCellWidth <= csramU32s.size) {
+                    val base = parseCellsValue(csramU32s, offset, cpuhvfsAddrCells)
+                    val size = parseCellsValue(csramU32s, offset + cpuhvfsAddrCells, cpuhvfsSizeCells)
+                    if (firstSlotAddr in base until (base + size)) {
+                        csramBase = base
+                        csramSize = size
+                        break
+                    }
+                    offset += cpuhvfsCellWidth
                 }
             }
         }
 
-        // Extrapolate available slots
-        val availableSlots = mutableListOf<Long>()
-        var currentSlotAddr = existingSlots[0].first
-        val slotSize = existingSlots[0].second.coerceAtLeast(0x120L)
-
-        while (availableSlots.size < maxDomainsAllowed && (currentSlotAddr + slotSize) <= csramEnd + 0x1000L) {
-            availableSlots.add(currentSlotAddr)
-            currentSlotAddr += stride
+        // Extrapolate available slots or limit to existing
+        val availableSlots: List<Long>
+        if (csramBase != null && csramSize != null) {
+            val slots = existingSlots.map { it.first }.toMutableList()
+            var nextSlot = slots.last() + stride
+            val csramEnd = csramBase + csramSize
+            while (slots.size < maxDomainsAllowed && (nextSlot + slotSize) <= csramEnd) {
+                if (!slots.contains(nextSlot)) {
+                    slots.add(nextSlot)
+                }
+                nextSlot += stride
+            }
+            availableSlots = slots
+        } else {
+            availableSlots = existingSlots.map { it.first }
+            if (cpuhvfsNode != null) {
+                diagnostics.add("[cpufreq] No cpuhvfs reg entry contains first controller slot 0x${firstSlotAddr.toString(16)}. Limiting available slots to existing slots (${availableSlots.size}).")
+            }
         }
 
         // Map original slot address per core
@@ -252,18 +374,26 @@ class TopologyEngine {
             availableSlots = availableSlots,
             maxDomainsAllowed = maxDomainsAllowed,
             cpuhvfsFound = (cpuhvfsNode != null),
+            csramBase = csramBase,
+            csramSize = csramSize,
+            diagnostics = diagnostics,
             astNode = controllerNode
         )
     }
 
     /**
      * Executes automatic domain slot assignment for clusters based on highest-capacity CPU core matching.
+     * Enforces strict slot availability without silent fallbacks.
      */
     fun assignDomainSlots(
         clusters: List<ClusterConfig>,
         cpuCores: List<CpuCoreDetail>,
         controllerInfo: PerformanceControllerInfo
     ): Map<Int, Long> {
+        if (clusters.size > controllerInfo.availableSlots.size) {
+            throw IllegalArgumentException("Requested cluster count (${clusters.size}) exceeds available cpufreq performance domain slots (${controllerInfo.availableSlots.size})")
+        }
+
         val assignment = mutableMapOf<Int, Long>()
         val availablePool = controllerInfo.availableSlots.toMutableList()
 
@@ -288,7 +418,7 @@ class TopologyEngine {
             }
         )
 
-        // 3. Assign slots
+        // 3. Assign slots strictly without silent fallback
         for (cluster in sortedClusters) {
             val clusterCores = cluster.cpuIndices.mapNotNull { idx -> cpuCores.getOrNull(idx) }
             val highestCapCore = clusterCores.maxByOrNull { (it.capacity ?: 0L) * 10000L + it.regAddress }
@@ -301,9 +431,7 @@ class TopologyEngine {
                 val nextSlot = availablePool.removeAt(0)
                 assignment[cluster.clusterIndex] = nextSlot
             } else {
-                // Out of slots fallback
-                val fallbackSlot = controllerInfo.availableSlots.lastOrNull() ?: 0x11bc10L
-                assignment[cluster.clusterIndex] = fallbackSlot
+                throw IllegalStateException("Insufficient available performance domain slots for cluster ${cluster.clusterIndex}")
             }
         }
 
@@ -319,10 +447,6 @@ class TopologyEngine {
         controllerInfo: PerformanceControllerInfo?
     ): List<String> {
         val warnings = mutableListOf<String>()
-
-        if (controllerInfo != null && clusters.size > controllerInfo.availableSlots.size) {
-            warnings.add("Requested cluster count (${clusters.size}) exceeds available cpufreq performance domain slots (${controllerInfo.availableSlots.size}). Some clusters will share frequency domains.")
-        }
 
         for (cluster in clusters) {
             val clusterCores = cluster.cpuIndices.mapNotNull { idx -> cpuCores.getOrNull(idx) }
@@ -347,6 +471,12 @@ class TopologyEngine {
     ): Pair<Boolean, String> {
         if (!plan.isValid) {
             return Pair(false, "Cannot apply invalid topology plan: ${plan.errors.joinToString("; ")}")
+        }
+
+        if (plan.syncCpufreq && controllerInfo != null) {
+            if (plan.clusters.size > controllerInfo.availableSlots.size) {
+                return Pair(false, "Requested cluster count (${plan.clusters.size}) exceeds available cpufreq performance domain slots (${controllerInfo.availableSlots.size})")
+            }
         }
 
         val cpusNode = findCpusNode(rootNode)
@@ -403,9 +533,16 @@ class TopologyEngine {
         if (plan.syncCpufreq && controllerInfo != null) {
             val slotSize = controllerInfo.existingSlots.firstOrNull()?.second ?: 0x120L
             val activeSlots = mutableListOf<Pair<Long, Long>>()
+            val usedSlotAddrs = mutableSetOf<Long>()
 
             for (clusterConfig in plan.clusters) {
-                val slotAddr = assignedSlots[clusterConfig.clusterIndex] ?: controllerInfo.availableSlots.first()
+                val slotAddr = assignedSlots[clusterConfig.clusterIndex]
+                    ?: return Pair(false, "Missing domain slot assignment for cluster ${clusterConfig.clusterIndex}")
+
+                if (usedSlotAddrs.contains(slotAddr)) {
+                    return Pair(false, "Duplicate domain slot 0x${slotAddr.toString(16)} detected for cluster ${clusterConfig.clusterIndex}")
+                }
+                usedSlotAddrs.add(slotAddr)
                 activeSlots.add(Pair(slotAddr, slotSize))
 
                 val domainIdx = clusterConfig.clusterIndex
@@ -423,6 +560,11 @@ class TopologyEngine {
                         targetCpuNode.properties.add(newProp)
                     }
                 }
+            }
+
+            // Verify no duplicate slots in activeSlots
+            if (activeSlots.map { it.first }.toSet().size != activeSlots.size) {
+                return Pair(false, "Duplicate slots detected in performance-controller reg: ${activeSlots.map { "0x" + it.first.toString(16) }}")
             }
 
             // Rewrite controller reg property

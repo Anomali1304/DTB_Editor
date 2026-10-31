@@ -32,6 +32,20 @@ data class TopologyPlan(
 }
 
 /**
+ * Result of live topology plan preview calculation from engine.
+ */
+data class TopologyPreviewResult(
+    val plan: TopologyPlan,
+    val assignedSlots: Map<Int, Long> = emptyMap(),
+    val duplicateSlots: Set<Long> = emptySet(),
+    val warnings: List<String> = emptyList(),
+    val errors: List<String> = emptyList(),
+    val summary: String = ""
+) {
+    val isValid: Boolean get() = errors.isEmpty()
+}
+
+/**
  * Detailed information for an individual CPU core extracted from the DT AST.
  */
 data class CpuCoreDetail(
@@ -62,5 +76,8 @@ data class PerformanceControllerInfo(
     val availableSlots: List<Long>,
     val maxDomainsAllowed: Int = 16,
     val cpuhvfsFound: Boolean = false,
+    val csramBase: Long? = null,
+    val csramSize: Long? = null,
+    val diagnostics: List<String> = emptyList(),
     val astNode: FdtNode
 )

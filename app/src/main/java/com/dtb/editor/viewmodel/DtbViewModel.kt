@@ -11,6 +11,7 @@ import com.dtb.editor.fdt.SampleDtbProvider
 import com.dtb.editor.fdt.cpu.ClusterConfig
 import com.dtb.editor.fdt.cpu.CpuTopologyManager
 import com.dtb.editor.fdt.cpu.CpuTopologyState
+import com.dtb.editor.fdt.cpu.TopologyPreviewResult
 import com.dtb.editor.fdt.diff.DiffSummary
 import com.dtb.editor.fdt.diff.DtsDiffEngine
 import com.dtb.editor.fdt.diff.TreeComparator
@@ -397,6 +398,11 @@ class DtbViewModel(
                 _isProcessing.value = false
             }
         }
+    }
+
+    fun previewPlan(clusterConfigs: List<ClusterConfig>, syncCpufreq: Boolean): TopologyPreviewResult? {
+        val top = _cpuTopology.value ?: return null
+        return topologyManager.previewPlan(clusterConfigs, top.cores, top.controllerInfo, syncCpufreq)
     }
 
     fun saveWorkspace() {

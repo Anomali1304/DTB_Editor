@@ -122,7 +122,8 @@ class CpuTopologyEngineTest {
 
         cpuhvfs@114400 {
             compatible = "mediatek,cpufreq-hybrid";
-            reg = <0x0 0x11bc00 0x0 0x1400>;
+            reg = <0x0 0x114400 0x0 0xc00 0x0 0x11bc00 0x0 0x1400 0x0 0x112800 0x0 0x1800 0x0 0x114f40 0x0 0xc0>;
+            reg-names = "USRAM", "CSRAM", "ESRAM";
             tbl-off = <0x0 0x100 0x200>;
             pll-con = <0x0 0x10 0x20>;
             clk-div = <0x0 0x1 0x2>;
@@ -143,6 +144,9 @@ class CpuTopologyEngineTest {
         assertEquals(0x11bc10L, controller.existingSlots[0].first)
         assertEquals(0x11bd30L, controller.existingSlots[1].first)
         assertEquals(3, controller.maxDomainsAllowed)
+        assertEquals(0x11bc00L, controller.csramBase)
+        assertEquals(0x1400L, controller.csramSize)
+        assertEquals(listOf(0x11bc10L, 0x11bd30L, 0x11be50L), controller.availableSlots)
 
         // Apply 2+3+3
         val plan233 = engine.createPlanFromSizes(listOf(2, 3, 3), 8)
@@ -165,24 +169,29 @@ class CpuTopologyEngineTest {
         assertEquals(3, cpuMap.children[1].children.size) // core0, core1, core2
         assertEquals(3, cpuMap.children[2].children.size) // core0, core1, core2
 
-        // Verify performance-domains per cpu
+        // Verify performance-domains per cpu: [0,0,1,1,1,2,2,2]
         val updatedCores = engine.extractCpuCores(root)
-        assertEquals(0, updatedCores[0].originalPerfDomainIndex) // cpu0 -> domain 0
-        assertEquals(0, updatedCores[1].originalPerfDomainIndex) // cpu1 -> domain 0
-        assertEquals(1, updatedCores[2].originalPerfDomainIndex) // cpu2 -> domain 1
-        assertEquals(1, updatedCores[3].originalPerfDomainIndex) // cpu3 -> domain 1
-        assertEquals(1, updatedCores[4].originalPerfDomainIndex) // cpu4 -> domain 1
-        assertEquals(2, updatedCores[5].originalPerfDomainIndex) // cpu5 -> domain 2
-        assertEquals(2, updatedCores[6].originalPerfDomainIndex) // cpu6 -> domain 2
-        assertEquals(2, updatedCores[7].originalPerfDomainIndex) // cpu7 -> domain 2
+        val domainPerCpu = updatedCores.map { it.originalPerfDomainIndex }
+        assertEquals(listOf(0, 0, 1, 1, 1, 2, 2, 2), domainPerCpu)
 
         // Verify performance-controller reg and reg-names
         val perfController = root.findNodeByPath("/soc/performance-controller@11bc00")!!
         val regVal = perfController.findProperty("reg")!!.asU32List()
         assertEquals(12, regVal.size) // 3 entries * 4 cells = 12 cells
+        assertEquals(0L, regVal[0])
         assertEquals(0x11bc10L, regVal[1]) // domain 0 = 0x11bc10
+        assertEquals(0L, regVal[2])
+        assertEquals(0x120L, regVal[3])
+
+        assertEquals(0L, regVal[4])
         assertEquals(0x11be50L, regVal[5]) // domain 1 = 0x11be50
+        assertEquals(0L, regVal[6])
+        assertEquals(0x120L, regVal[7])
+
+        assertEquals(0L, regVal[8])
         assertEquals(0x11bd30L, regVal[9]) // domain 2 = 0x11bd30
+        assertEquals(0L, regVal[10])
+        assertEquals(0x120L, regVal[11])
 
         val regNamesList = perfController.findProperty("reg-names")!!.asStringList()
         assertEquals(3, regNamesList.size)
@@ -211,14 +220,14 @@ class CpuTopologyEngineTest {
         val (success, log) = engine.applyPlanToAst(root, plan62, cores233, controller233, slots62)
         assertTrue(success)
 
-        println("DEBUG ROUNDTRIP slots62: $slots62")
-        // Verify restored reg
+        // Verify exact restored reg and slots
         val perfController = root.findNodeByPath("/soc/performance-controller@11bc00")!!
         val regVal = perfController.findProperty("reg")!!.asU32List()
-        println("DEBUG ROUNDTRIP regVal: $regVal")
         assertEquals(8, regVal.size) // 2 entries * 4 cells
-        assertTrue("Cluster 0 domain 0 must use valid A55 slot", regVal[1] == 0x11bc10L || regVal[1] == 0x11be50L || regVal[1] == 0x11bd30L)
-        assertTrue("Cluster 1 domain 1 must use valid slot", regVal[5] == 0x11bd30L || regVal[5] == 0x11be50L || regVal[5] == 0x11bc10L)
+        assertEquals(0x11bc10L, regVal[1])
+        assertEquals(0x11bd30L, regVal[5])
+        assertEquals(0x11bc10L, slots62[0])
+        assertEquals(0x11bd30L, slots62[1])
     }
 
     @Test
@@ -228,10 +237,9 @@ class CpuTopologyEngineTest {
         val cores = engine.extractCpuCores(root)
         val controller = engine.discoverPerformanceController(root, cores)!!
 
-        val plan1x8 = engine.createPlanFromSizes(listOf(1, 1, 1, 1, 1, 1, 1, 1), 8)
-        val warnings = engine.generateWarnings(plan1x8.clusters, cores, controller)
-
-        assertTrue(warnings.any { it.contains("exceeds available cpufreq performance domain slots") })
+        val plan1x8 = engine.createPlanFromSizes(listOf(1, 1, 1, 1, 1, 1, 1, 1), 8, controller.availableSlots.size)
+        assertFalse(plan1x8.isValid)
+        assertTrue(plan1x8.errors.any { it.contains("exceeds available cpufreq performance domain slots") })
 
         // Test invalid CPU assignment (out of bounds or duplicate CPU)
         val invalidConfig = listOf(
@@ -283,20 +291,116 @@ class CpuTopologyEngineTest {
         val cores = engine.extractCpuCores(root)
         val controller = engine.discoverPerformanceController(root, cores)!!
 
-        val plan44 = engine.createPlanFromSizes(listOf(4, 4), 8)
-        val slots44 = engine.assignDomainSlots(plan44.clusters, cores, controller)
-        val (succ44, _) = engine.applyPlanToAst(root, plan44, cores, controller, slots44)
-        assertTrue(succ44)
-
+        // [4, 2, 2] -> slot c0=0x11bc10, c1=0x11be50, c2=0x11bd30
         val plan422 = engine.createPlanFromSizes(listOf(4, 2, 2), 8)
         val slots422 = engine.assignDomainSlots(plan422.clusters, cores, controller)
+        assertEquals(0x11bc10L, slots422[0])
+        assertEquals(0x11be50L, slots422[1])
+        assertEquals(0x11bd30L, slots422[2])
         val (succ422, _) = engine.applyPlanToAst(root, plan422, cores, controller, slots422)
         assertTrue(succ422)
 
+        // [4, 4] -> 0x11bc10 dan 0x11bd30
+        val plan44 = engine.createPlanFromSizes(listOf(4, 4), 8)
+        val slots44 = engine.assignDomainSlots(plan44.clusters, cores, controller)
+        assertEquals(0x11bc10L, slots44[0])
+        assertEquals(0x11bd30L, slots44[1])
+        val (succ44, _) = engine.applyPlanToAst(root, plan44, cores, controller, slots44)
+        assertTrue(succ44)
+
+        // Single cluster [8]
         val plan8 = engine.createPlanFromSizes(listOf(8), 8)
         val slots8 = engine.assignDomainSlots(plan8.clusters, cores, controller)
+        assertEquals(1, slots8.size)
         val (succ8, _) = engine.applyPlanToAst(root, plan8, cores, controller, slots8)
         assertTrue(succ8)
+    }
+
+    @Test
+    fun testFourClustersReturnsError() {
+        val root = dtsParser.parse(STOCK_MT6789_DTS).rootNode
+        val cores = engine.extractCpuCores(root)
+        val controller = engine.discoverPerformanceController(root, cores)!!
+        assertEquals(3, controller.availableSlots.size)
+
+        // 4 clusters exceeds 3 available slots
+        val plan4 = engine.createPlanFromSizes(listOf(2, 2, 2, 2), 8, controller.availableSlots.size)
+        assertFalse("4 clusters plan must be invalid", plan4.isValid)
+        assertTrue(plan4.errors.any { it.contains("exceeds available cpufreq performance domain slots") })
+
+        val (success, err) = engine.applyPlanToAst(root, plan4, cores, controller, emptyMap())
+        assertFalse("applyPlanToAst must reject plan exceeding available slots", success)
+        assertTrue(err.contains("invalid topology plan") || err.contains("exceeds available"))
+    }
+
+    @Test
+    fun testNoDuplicateSlotsForAnyPreset() {
+        val presets = listOf(
+            listOf(6, 2),
+            listOf(2, 3, 3),
+            listOf(4, 2, 2),
+            listOf(4, 4),
+            listOf(8)
+        )
+
+        for (preset in presets) {
+            val root = dtsParser.parse(STOCK_MT6789_DTS).rootNode
+            val cores = engine.extractCpuCores(root)
+            val controller = engine.discoverPerformanceController(root, cores)!!
+            val plan = engine.createPlanFromSizes(preset, 8, controller.availableSlots.size)
+            assertTrue("Plan for preset $preset must be valid", plan.isValid)
+
+            val slots = engine.assignDomainSlots(plan.clusters, cores, controller)
+            assertEquals("Assigned slots must not contain duplicates for preset $preset", slots.values.toSet().size, slots.values.size)
+
+            val (success, log) = engine.applyPlanToAst(root, plan, cores, controller, slots)
+            assertTrue("applyPlanToAst for preset $preset must succeed: $log", success)
+
+            val perfController = root.findNodeByPath("/soc/performance-controller@11bc00")!!
+            val regU32s = perfController.findProperty("reg")!!.asU32List()
+            val regSlotAddrs = mutableListOf<Long>()
+            var i = 0
+            while (i + 4 <= regU32s.size) {
+                regSlotAddrs.add(regU32s[i + 1])
+                i += 4
+            }
+            assertEquals("Reg slots must not contain duplicates for preset $preset", regSlotAddrs.toSet().size, regSlotAddrs.size)
+        }
+    }
+
+    @Test
+    fun testCsramNoMatchingEntryFallback() {
+        val dtsNoMatch = STOCK_MT6789_DTS.replace(
+            "reg = <0x0 0x114400 0x0 0xc00 0x0 0x11bc00 0x0 0x1400 0x0 0x112800 0x0 0x1800 0x0 0x114f40 0x0 0xc0>;",
+            "reg = <0x0 0x114400 0x0 0xc00 0x0 0x112800 0x0 0x1800>;"
+        )
+        val root = dtsParser.parse(dtsNoMatch).rootNode
+        val cores = engine.extractCpuCores(root)
+        val controller = engine.discoverPerformanceController(root, cores)!!
+
+        assertEquals(2, controller.availableSlots.size)
+        assertEquals(listOf(0x11bc10L, 0x11bd30L), controller.availableSlots)
+        assertNull(controller.csramBase)
+        assertTrue(controller.diagnostics.any { it.contains("Limiting available slots to existing slots") })
+    }
+
+    @Test
+    fun testExtractTopologyCpuIndexMapping() {
+        val root = dtsParser.parse(STOCK_MT6789_DTS).rootNode
+        val manager = com.dtb.editor.fdt.cpu.CpuTopologyManager(engine)
+        val state = manager.extractTopology(root)
+
+        assertEquals(2, state.clusters.size)
+        assertEquals(6, state.clusters[0].cores.size)
+        assertEquals(2, state.clusters[1].cores.size)
+
+        // Cluster 0 cores must have coreIndex 0..5
+        val c0Indices = state.clusters[0].cores.map { it.coreIndex }
+        assertEquals(listOf(0, 1, 2, 3, 4, 5), c0Indices)
+
+        // Cluster 1 cores must have coreIndex 6..7
+        val c1Indices = state.clusters[1].cores.map { it.coreIndex }
+        assertEquals(listOf(6, 7), c1Indices)
     }
 
     @Test

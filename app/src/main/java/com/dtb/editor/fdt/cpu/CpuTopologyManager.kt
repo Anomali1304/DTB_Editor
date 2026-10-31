@@ -7,7 +7,8 @@ data class CpuCoreInfo(
     val regAddress: Long,
     val phandle: Long?,
     val clusterIndex: Int,
-    val compatible: String = ""
+    val compatible: String = "",
+    val coreIndex: Int = 0
 )
 
 data class CpuCluster(
@@ -51,6 +52,7 @@ class CpuTopologyManager(
             if (controllerInfo.cpuhvfsFound) {
                 diagnostics.add("[cpufreq] Discovered cpuhvfs node. Max domain limit: ${controllerInfo.maxDomainsAllowed}")
             }
+            diagnostics.addAll(controllerInfo.diagnostics)
         } else {
             diagnostics.add("[cpufreq] No performance-controller detected via performance-domains phandle.")
         }
@@ -74,7 +76,9 @@ class CpuTopologyManager(
                     val cpuProp = coreChild.findProperty("cpu")
                     val refPhandle = cpuProp?.asSingleU32()
 
-                    val matchedCore = cores.firstOrNull { it.phandle != null && it.phandle == refPhandle }
+                    val matchedCore = if (refPhandle != null) {
+                        cores.firstOrNull { it.phandle != null && it.phandle == refPhandle }
+                    } else null
                         ?: cores.getOrNull(cluster.cores.size + clusters.sumOf { it.cores.size })
 
                     if (matchedCore != null) {
@@ -84,7 +88,8 @@ class CpuTopologyManager(
                                 regAddress = matchedCore.regAddress,
                                 phandle = matchedCore.phandle,
                                 clusterIndex = cIdx,
-                                compatible = matchedCore.microarch
+                                compatible = matchedCore.microarch,
+                                coreIndex = matchedCore.index
                             )
                         )
                     } else {
@@ -105,7 +110,8 @@ class CpuTopologyManager(
                         regAddress = it.regAddress,
                         phandle = it.phandle,
                         clusterIndex = 0,
-                        compatible = it.microarch
+                        compatible = it.microarch,
+                        coreIndex = it.index
                     )
                 }.toMutableList()
             )
@@ -114,11 +120,24 @@ class CpuTopologyManager(
         }
 
         val clusterConfigs = clusters.map { c ->
-            ClusterConfig(c.index, c.cores.map { it.nodeName.removePrefix("cpu@").removePrefix("cpu").toIntOrNull() ?: 0 })
+            val cpuIndices = c.cores.map { coreInfo ->
+                val matched = if (coreInfo.phandle != null) {
+                    cores.firstOrNull { it.phandle == coreInfo.phandle }
+                } else {
+                    cores.firstOrNull { it.nodeName == coreInfo.nodeName }
+                }
+                matched?.index ?: coreInfo.coreIndex
+            }
+            ClusterConfig(c.index, cpuIndices)
         }
 
         val assignedSlots = if (controllerInfo != null) {
-            engine.assignDomainSlots(clusterConfigs, cores, controllerInfo)
+            try {
+                engine.assignDomainSlots(clusterConfigs, cores, controllerInfo)
+            } catch (e: Exception) {
+                diagnostics.add("Domain slot assignment warning: ${e.message}")
+                emptyMap()
+            }
         } else {
             emptyMap()
         }
@@ -147,10 +166,12 @@ class CpuTopologyManager(
         val cores = engine.extractCpuCores(rootNode)
         if (cores.isEmpty()) return Pair(false, "No CPU cores found in /cpus node")
 
-        val plan = engine.createPlanFromSizes(clusterSizes, cores.size).copy(syncCpufreq = syncCpufreq)
+        val controllerInfo = if (syncCpufreq) engine.discoverPerformanceController(rootNode, cores) else null
+        val maxClusters = controllerInfo?.availableSlots?.size
+
+        val plan = engine.createPlanFromSizes(clusterSizes, cores.size, maxClusters).copy(syncCpufreq = syncCpufreq)
         if (!plan.isValid) return Pair(false, plan.errors.joinToString("; "))
 
-        val controllerInfo = if (syncCpufreq) engine.discoverPerformanceController(rootNode, cores) else null
         val warnings = engine.generateWarnings(plan.clusters, cores, controllerInfo)
         val planWithWarnings = plan.copy(warnings = warnings)
 
@@ -167,15 +188,26 @@ class CpuTopologyManager(
         val cores = engine.extractCpuCores(rootNode)
         if (cores.isEmpty()) return Pair(false, "No CPU cores found in /cpus node")
 
-        val plan = engine.validatePlan(clusterConfigs, cores.size).copy(syncCpufreq = syncCpufreq)
+        val controllerInfo = if (syncCpufreq) engine.discoverPerformanceController(rootNode, cores) else null
+        val maxClusters = controllerInfo?.availableSlots?.size
+
+        val plan = engine.validatePlan(clusterConfigs, cores.size, maxClusters).copy(syncCpufreq = syncCpufreq)
         if (!plan.isValid) return Pair(false, plan.errors.joinToString("; "))
 
-        val controllerInfo = if (syncCpufreq) engine.discoverPerformanceController(rootNode, cores) else null
         val warnings = engine.generateWarnings(plan.clusters, cores, controllerInfo)
         val planWithWarnings = plan.copy(warnings = warnings)
 
         val slots = if (controllerInfo != null) engine.assignDomainSlots(plan.clusters, cores, controllerInfo) else emptyMap()
 
         return engine.applyPlanToAst(rootNode, planWithWarnings, cores, controllerInfo, slots)
+    }
+
+    fun previewPlan(
+        clusterConfigs: List<ClusterConfig>,
+        cores: List<CpuCoreDetail>,
+        controllerInfo: PerformanceControllerInfo?,
+        syncCpufreq: Boolean
+    ): TopologyPreviewResult {
+        return engine.previewPlan(clusterConfigs, cores, controllerInfo, syncCpufreq)
     }
 }
