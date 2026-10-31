@@ -331,7 +331,7 @@ class DtbViewModel(
                         cpuTopology = topologyManager.extractTopology(parsed.rootNode),
                         isModified = false
                     )
-                    _snackbarMessage.emit("Topologi diterapkan ke DTS")
+                    _snackbarMessage.emit("Topology applied to DTS")
                 } catch (e: Exception) {
                     _snackbarMessage.emit(e.message ?: "Failed to apply topology")
                 } finally {

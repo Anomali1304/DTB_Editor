@@ -205,7 +205,7 @@ fun MainScreen(viewModel: DtbViewModel = viewModel()) {
                     ) {
                         Icon(Icons.Default.FolderOpen, contentDescription = null)
                         Spacer(modifier = Modifier.width(12.dp))
-                        Text("Open vendor_boot.img", style = MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.import_vb), style = MaterialTheme.typography.titleMedium)
                     }
                     Spacer(modifier = Modifier.height(16.dp))
                     OutlinedButton(
@@ -216,7 +216,7 @@ fun MainScreen(viewModel: DtbViewModel = viewModel()) {
                     ) {
                         Icon(Icons.Default.Code, contentDescription = null)
                         Spacer(modifier = Modifier.width(12.dp))
-                        Text("Open dtb", style = MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.import_dtb), style = MaterialTheme.typography.titleMedium)
                     }
                 }
             } else {

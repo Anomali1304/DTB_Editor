@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">DTB Editor</string>
+    <string name="app_name">DTB Studio</string>
     <string name="error_processing_dts">Failed to process DTS</string>
     <string name="error_opening_stream">Failed to open file stream</string>
     <string name="error_unrecognized_format">Unrecognized file format</string>
@@ -12,9 +12,9 @@
     <string name="error_save_verification">Verification before save failed</string>
     <string name="error_saving_file">Failed to save file</string>
     <string name="msg_saved">File saved successfully</string>
-    <string name="msg_topology_applied">Topology applied to DTS</string>
+    <string name="msg_topology_applied">Topology applied successfully</string>
     <string name="no_cpu_nodes_detected">No CPU nodes detected in this Device Tree.</string>
-    <string name="initializing_draft_topology">Initializing draft topology from current state</string>
+    <string name="initializing_draft_topology">Initializing draft topology</string>
     <string name="error_invalid_vb_magic">Invalid vendor_boot magic</string>
     <string name="error_unsupported_header_version">Header version not supported: v%1$d</string>
     <string name="error_invalid_page_size">Invalid page size: %1$d (must be power of two and >= 4096)</string>
@@ -27,19 +27,21 @@
     <string name="error_duplicate_slot_selection">Slots (%1$s) selected by more than one cluster</string>
     <string name="error_failed_determining_slot_domain">Failed to determine slot domain</string>
     <string name="error_only_topology_changes_detected">Only topology changes detected</string>
-    <string name="cpu_topology_title">Current CPU Topology</string>
+    <string name="cpu_topology_title">CPU Topology</string>
     <string name="cpu_controller_label">Cpufreq controller: %1$s (%2$d slots CSRAM)</string>
-    <string name="quick_presets">Quick Presets</string>
-    <string name="core_to_cluster_assignment">Core to Cluster Assignment</string>
+    <string name="quick_presets">Topology Presets</string>
+    <string name="core_to_cluster_assignment">CPU Cluster Mapping</string>
     <string name="add_cluster">+ Cluster</string>
     <string name="delete_cluster">- Delete C%1$d</string>
-    <string name="cluster_slot_selector_label">CSRAM Slots for Frequency Controller</string>
+    <string name="cluster_slot_selector_label">Performance Controller Slots</string>
     <string name="cluster_index_label">Cluster %1$d:</string>
     <string name="automatic_slot">Automatic (%1$s)</string>
     <string name="automatic">Automatic</string>
     <string name="preview_topology_title">Topology Preview</string>
     <string name="empty_cluster_label">(empty)</string>
-    <string name="apply_to_dts">Apply to DTS</string>
-    <string name="apply_fix_errors">Apply (Fix Errors)</string>
+    <string name="apply_to_dts">Apply Topology</string>
+    <string name="apply_fix_errors">Resolve Conflicts</string>
     <string name="editor_info">%1$d parts (%2$d lines)</string>
+    <string name="import_vb">Import Vendor Boot Image</string>
+    <string name="import_dtb">Import Device Tree Blob</string>
 </resources>

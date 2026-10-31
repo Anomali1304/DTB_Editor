@@ -1,6 +1,8 @@
 package com.dtb.editor.ui.screens
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
@@ -58,7 +60,18 @@ fun CpuTopologyScreen(
     }
 
     val preview = viewModel.previewPlan(draftConfigs, syncCpufreq)
-    var selectedPreset by remember(fileState.currentDtsText) { mutableStateOf<List<Int>?>(null) }
+    
+    // Auto-detect initial preset from DTB clusters
+    val initialPreset = top.clusters.map { it.cores.size }
+    var selectedPreset by remember(fileState.currentDtsText) { mutableStateOf<List<Int>?>(initialPreset) }
+    
+    // MT6789 restriction
+    if (top.model != "MT6789" && top.model != "mt6789") {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("This app is exclusively for MT6789 devices.")
+        }
+        return
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -115,15 +128,19 @@ fun CpuTopologyScreen(
                     val presets = getApplicablePresets(totalCores)
                     for (preset in presets) {
                         val isSelected = preset == selectedPreset
+                        val containerColor by animateColorAsState(
+                            targetValue = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                            animationSpec = spring(stiffness = 300f, dampingRatio = 0.6f)
+                        )
                         SuggestionChip(
                             onClick = {
                                 draftConfigs = createConfigsFromSizes(preset, totalCores)
                                 selectedPreset = preset
                             },
                             label = { Text(preset.joinToString("+")) },
-                            colors = if (isSelected) SuggestionChipDefaults.suggestionChipColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer
-                            ) else SuggestionChipDefaults.suggestionChipColors()
+                            colors = SuggestionChipDefaults.suggestionChipColors(
+                                containerColor = containerColor
+                            )
                         )
                     }
                 }
@@ -144,26 +161,7 @@ fun CpuTopologyScreen(
                         fontWeight = FontWeight.Bold
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        val maxSlots = top.controllerInfo?.availableSlots?.size ?: totalCores
-                        if (draftConfigs.size < maxSlots) {
-                            TextButton(
-                                onClick = {
-                                    val nextIdx = draftConfigs.size
-                                    draftConfigs = draftConfigs + ClusterConfig(nextIdx, emptyList())
-                                }
-                            ) {
-                                Text(stringResource(R.string.add_cluster))
-                            }
-                        }
-                        if (draftConfigs.size > 1 && draftConfigs.last().cpuIndices.isEmpty()) {
-                            TextButton(
-                                onClick = {
-                                    draftConfigs = draftConfigs.dropLast(1)
-                                }
-                            ) {
-                                Text(stringResource(R.string.delete_cluster, draftConfigs.lastIndex))
-                            }
-                        }
+                        // Cluster customization disabled for MT6789
                     }
                 }
 

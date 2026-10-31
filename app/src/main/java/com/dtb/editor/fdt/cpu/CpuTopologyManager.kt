@@ -21,6 +21,7 @@ data class CpuTopologyState(
     val clusters: List<CpuCluster>,
     val totalCores: Int,
     val hasCpuMap: Boolean,
+    val model: String = "Unknown",
     val cores: List<CpuCoreDetail> = emptyList(),
     val controllerInfo: PerformanceControllerInfo? = null,
     val assignedSlots: Map<Int, Long> = emptyMap(),
@@ -39,7 +40,18 @@ class CpuTopologyManager(
 
         if (cores.isEmpty()) {
             diagnostics.add("No /cpus core nodes detected in imported Device Tree.")
-            return CpuTopologyState(emptyList(), 0, false, emptyList(), null, emptyMap(), diagnostics, false, false)
+            return CpuTopologyState(
+                clusters = emptyList(),
+                totalCores = 0,
+                hasCpuMap = false,
+                model = "Unknown",
+                cores = emptyList(),
+                controllerInfo = null,
+                assignedSlots = emptyMap(),
+                diagnostics = diagnostics,
+                syncCpufreqSupported = false,
+                syncCpufreqEnabled = false
+            )
         }
 
         val controllerInfo = engine.discoverPerformanceController(rootNode, cores)
@@ -149,6 +161,7 @@ class CpuTopologyManager(
             clusters = clusters,
             totalCores = cores.size,
             hasCpuMap = (cpuMapNode != null),
+            model = rootNode.findProperty("model")?.asStringList()?.firstOrNull() ?: "Unknown",
             cores = cores,
             controllerInfo = controllerInfo,
             assignedSlots = assignedSlots,
