@@ -1,19 +1,3 @@
 <resources>
     <string name="app_name">DTB Editor</string>
-    <string name="open_vendor_boot">Buka vendor_boot.img</string>
-    <string name="open_dtb">Buka dtb</string>
-    <string name="select_dtb_entry">Pilih Entri DTB</string>
-    <string name="select_entry_desc">Pilih entri DTB yang ingin diedit:</string>
-    <string name="tab_cpu">CPU</string>
-    <string name="tab_dts">DTS</string>
-    <string name="save">Simpan</string>
-    <string name="apply_topology">Terapkan ke DTS</string>
-    <string name="topology_applied">Topologi diterapkan ke DTS</string>
-    <string name="avb_footer_warning">Footer AVB akan dibuang; verifikasi harus sudah nonaktif di perangkat.</string>
-    <string name="file_saved">File berhasil disimpan</string>
-    <string name="unrecognized_format">Format file tidak dikenali</string>
-    <string name="output_size_exceeded">Ukuran hasil melebihi file asli</string>
-    <string name="verification_failed">Verifikasi sebelum simpan gagal</string>
-    <string name="cancel">Batal</string>
-    <string name="open">Buka</string>
 </resources>

@@ -2,10 +2,12 @@ package com.dtb.editor
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Code
@@ -58,6 +60,38 @@ fun MainScreen(viewModel: DtbViewModel = viewModel()) {
         }
     }
 
+    var showDiscardDialog by remember { mutableStateOf(false) }
+
+    // Handle back navigation
+    BackHandler(enabled = fileState != null) {
+        if (fileState?.isModified == true) {
+            showDiscardDialog = true
+        } else {
+            viewModel.closeFile()
+        }
+    }
+
+    if (showDiscardDialog) {
+        AlertDialog(
+            onDismissRequest = { showDiscardDialog = false },
+            title = { Text("Discard changes?") },
+            text = { Text("You have unsaved changes. Discard them and return to the start screen?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.closeFile()
+                    showDiscardDialog = false
+                }) {
+                    Text("Discard")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDiscardDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     // SAF Open Launcher
     val openLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -83,27 +117,25 @@ fun MainScreen(viewModel: DtbViewModel = viewModel()) {
         modifier = Modifier.fillMaxSize(),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = fileState?.fileName ?: stringResource(R.string.app_name),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        if (fileState != null) {
+            if (fileState != null) {
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text(
+                                text = fileState!!.fileName,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
                             val entry = fileState!!.dtbEntries.getOrNull(fileState!!.selectedEntryIndex)
-                            val entryName = entry?.model ?: entry?.compatible ?: "Entri ${fileState!!.selectedEntryIndex}"
+                            val entryName = entry?.model ?: entry?.compatible ?: "Entry ${fileState!!.selectedEntryIndex}"
                             Text(
                                 text = entryName,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                    }
-                },
-                actions = {
-                    if (fileState != null) {
+                    },
+                    actions = {
                         IconButton(
                             onClick = {
                                 val prepared = viewModel.prepareSaveBytes()
@@ -114,24 +146,24 @@ fun MainScreen(viewModel: DtbViewModel = viewModel()) {
                             },
                             enabled = !isProcessing
                         ) {
-                            Icon(Icons.Default.Save, contentDescription = stringResource(R.string.save))
+                            Icon(Icons.Default.Save, contentDescription = "Save")
                         }
                     }
-                }
-            )
+                )
+            }
         },
         bottomBar = {
             if (fileState != null) {
                 NavigationBar {
                     NavigationBarItem(
                         icon = { Icon(Icons.Default.Memory, contentDescription = null) },
-                        label = { Text(stringResource(R.string.tab_cpu)) },
+                        label = { Text("CPU") },
                         selected = activeTab == AppTab.CPU,
                         onClick = { viewModel.selectTab(AppTab.CPU) }
                     )
                     NavigationBarItem(
                         icon = { Icon(Icons.Default.Code, contentDescription = null) },
-                        label = { Text(stringResource(R.string.tab_dts)) },
+                        label = { Text("DTS") },
                         selected = activeTab == AppTab.DTS,
                         onClick = { viewModel.selectTab(AppTab.DTS) }
                     )
@@ -150,7 +182,7 @@ fun MainScreen(viewModel: DtbViewModel = viewModel()) {
 
             val currentFile = fileState
             if (currentFile == null) {
-                // Layar Awal
+                // Start Screen
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -159,13 +191,12 @@ fun MainScreen(viewModel: DtbViewModel = viewModel()) {
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = stringResource(R.string.app_name),
+                        text = "DTB Editor",
                         style = MaterialTheme.typography.headlineLarge,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
                     )
                     Spacer(modifier = Modifier.height(32.dp))
-
                     Button(
                         onClick = { openLauncher.launch(arrayOf("*/*")) },
                         modifier = Modifier
@@ -174,11 +205,9 @@ fun MainScreen(viewModel: DtbViewModel = viewModel()) {
                     ) {
                         Icon(Icons.Default.FolderOpen, contentDescription = null)
                         Spacer(modifier = Modifier.width(12.dp))
-                        Text(stringResource(R.string.open_vendor_boot), style = MaterialTheme.typography.titleMedium)
+                        Text("Open vendor_boot.img", style = MaterialTheme.typography.titleMedium)
                     }
-
                     Spacer(modifier = Modifier.height(16.dp))
-
                     OutlinedButton(
                         onClick = { openLauncher.launch(arrayOf("*/*")) },
                         modifier = Modifier
@@ -187,11 +216,11 @@ fun MainScreen(viewModel: DtbViewModel = viewModel()) {
                     ) {
                         Icon(Icons.Default.Code, contentDescription = null)
                         Spacer(modifier = Modifier.width(12.dp))
-                        Text(stringResource(R.string.open_dtb), style = MaterialTheme.typography.titleMedium)
+                        Text("Open dtb", style = MaterialTheme.typography.titleMedium)
                     }
                 }
             } else {
-                // Layar Kerja
+                // Work Screen
                 Column(modifier = Modifier.fillMaxSize()) {
                     if (currentFile.hasAvbFooter) {
                         Surface(
@@ -199,7 +228,7 @@ fun MainScreen(viewModel: DtbViewModel = viewModel()) {
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
-                                text = stringResource(R.string.avb_footer_warning),
+                                text = "The AVB footer will be removed. Verification must already be disabled on the device.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onErrorContainer,
                                 modifier = Modifier.padding(12.dp)
@@ -216,14 +245,13 @@ fun MainScreen(viewModel: DtbViewModel = viewModel()) {
                 }
             }
 
-            // Dialog pilih entri DTB bila > 1
             if (pendingMulti != null) {
                 AlertDialog(
                     onDismissRequest = { viewModel.cancelMultiDtbSelection() },
-                    title = { Text(stringResource(R.string.select_dtb_entry)) },
+                    title = { Text("Select DTB Entry") },
                     text = {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(stringResource(R.string.select_entry_desc))
+                            Text("Select a DTB entry to edit:")
                             for (entry in pendingMulti!!.dtbEntries) {
                                 Surface(
                                     shape = MaterialTheme.shapes.small,
@@ -239,7 +267,7 @@ fun MainScreen(viewModel: DtbViewModel = viewModel()) {
                                     ) {
                                         Text(entry.displayLabel, style = MaterialTheme.typography.bodyMedium)
                                         TextButton(onClick = { viewModel.selectDtbEntry(entry.index) }) {
-                                            Text(stringResource(R.string.open))
+                                            Text("Open")
                                         }
                                     }
                                 }
@@ -249,7 +277,7 @@ fun MainScreen(viewModel: DtbViewModel = viewModel()) {
                     confirmButton = {},
                     dismissButton = {
                         TextButton(onClick = { viewModel.cancelMultiDtbSelection() }) {
-                            Text(stringResource(R.string.cancel))
+                            Text("Cancel")
                         }
                     }
                 )

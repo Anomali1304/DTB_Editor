@@ -1,18 +1,28 @@
 # DTB Editor
 
-Aplikasi Android untuk membuka, mengedit topologi CPU dan sumber DTS, serta menyimpan kembali file vendor_boot.img atau DTB / DT Table.
+Edit the DTB in vendor_boot.img or a standalone dtb, mainly CPU cluster topology.
 
-## Cara Build
+## Supported Inputs and Outputs
+- vendor_boot.img in -> vendor_boot.img out
+- DT table in -> DT table out
+- raw dtb in -> raw dtb out
 
-1. Pastikan lingkungan Android SDK sudah terkonfigurasi.
-2. Jalankan perintah Gradle:
-   `gradle :app:assembleDebug`
+## How to Use
+1. Open a file.
+2. Change topology on the CPU tab or edit text on the DTS tab.
+3. Save the file.
+4. Flash the modified file to the device.
 
-## Cara Pakai
+## Notes and Limits
+- AVB footer is removed and not re-signed, so verification must already be disabled.
+- Ramdisk is copied byte for byte.
+- Always keep a backup of the stock vendor_boot.
+- Frequency tables live in firmware, so a valid dtb is not a guarantee of a stable device.
+- Tested only on MT6789 / Helio G99.
 
-1. Buka aplikasi, lalu pilih file `vendor_boot.img` atau file Device Tree (`.dtb`).
-2. Gunakan tab **CPU** untuk mengatur topologi core dan slot domain cpufreq, atau tab **DTS** untuk mengedit kode sumber secara tervirtualisasi.
-3. Tekan tombol **Simpan** di bilah atas untuk menulis hasil modifikasi ke file baru.
+## How to Build
+1. Ensure Android SDK and JDK are configured.
+2. Run: `gradle :app:assembleDebug`
 
-## Batasan Editor DTS
-- Seleksi teks pada tab DTS dibatasi di dalam potongan (chunk) masing-masing dan tidak bisa melewati batas potongan.
+## Credits
+Launcher icon uses custom vector art.

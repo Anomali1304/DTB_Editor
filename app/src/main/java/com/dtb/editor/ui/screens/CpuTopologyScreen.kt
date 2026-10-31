@@ -277,7 +277,7 @@ fun CpuTopologyScreen(
             }
         }
 
-        // 7. Tombol Terapkan
+        // 7. Apply Button
         item {
             val isEnabled = preview != null && preview.isValid && draftConfigs.isNotEmpty()
             Button(
@@ -287,7 +287,7 @@ fun CpuTopologyScreen(
                 enabled = isEnabled,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(if (isEnabled) "Terapkan ke DTS" else "Terapkan (Perbaiki Error)")
+                Text(if (isEnabled) "Apply to DTS" else "Apply (Fix Errors)")
             }
         }
     }
