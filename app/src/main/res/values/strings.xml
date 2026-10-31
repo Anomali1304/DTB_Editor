@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">DTB Studio</string>
+    <string name="app_name">DTB Editor</string>
     <string name="error_processing_dts">Failed to process DTS</string>
     <string name="error_opening_stream">Failed to open file stream</string>
     <string name="error_unrecognized_format">Unrecognized file format</string>

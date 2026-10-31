@@ -1,6 +1,6 @@
 {
   "name": "DTB Editor",
-  "description": "Editor Device Tree (DTB) dan vendor_boot untuk Android.",
+  "description": "Native Android Device Tree Blob (DTB) inspector and editor.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

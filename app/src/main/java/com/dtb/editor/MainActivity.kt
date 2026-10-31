@@ -22,6 +22,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dtb.editor.ui.screens.CpuTopologyScreen
 import com.dtb.editor.ui.screens.EditorScreen
@@ -154,19 +156,22 @@ fun MainScreen(viewModel: DtbViewModel = viewModel()) {
         },
         bottomBar = {
             if (fileState != null) {
-                NavigationBar {
-                    NavigationBarItem(
-                        icon = { Icon(Icons.Default.Memory, contentDescription = null) },
-                        label = { Text("CPU") },
-                        selected = activeTab == AppTab.CPU,
-                        onClick = { viewModel.selectTab(AppTab.CPU) }
-                    )
-                    NavigationBarItem(
-                        icon = { Icon(Icons.Default.Code, contentDescription = null) },
-                        label = { Text("DTS") },
-                        selected = activeTab == AppTab.DTS,
-                        onClick = { viewModel.selectTab(AppTab.DTS) }
-                    )
+                val isMt6789 = fileState!!.cpuTopology.model.equals("MT6789", ignoreCase = true)
+                if (isMt6789) {
+                    NavigationBar {
+                        NavigationBarItem(
+                            icon = { Icon(Icons.Default.Memory, contentDescription = null) },
+                            label = { Text("CPU") },
+                            selected = activeTab == AppTab.CPU,
+                            onClick = { viewModel.selectTab(AppTab.CPU) }
+                        )
+                        NavigationBarItem(
+                            icon = { Icon(Icons.Default.Code, contentDescription = null) },
+                            label = { Text("DTS") },
+                            selected = activeTab == AppTab.DTS,
+                            onClick = { viewModel.selectTab(AppTab.DTS) }
+                        )
+                    }
                 }
             }
         }
@@ -221,26 +226,41 @@ fun MainScreen(viewModel: DtbViewModel = viewModel()) {
                 }
             } else {
                 // Work Screen
-                Column(modifier = Modifier.fillMaxSize()) {
-                    if (currentFile.hasAvbFooter) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.errorContainer,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = "The AVB footer will be removed. Verification must already be disabled on the device.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                modifier = Modifier.padding(12.dp)
-                            )
+                val isMt6789 = currentFile.cpuTopology.model.equals("MT6789", ignoreCase = true)
+                if (isMt6789) {
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        if (currentFile.hasAvbFooter) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.errorContainer,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "The AVB footer will be removed. Verification must already be disabled on the device.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    modifier = Modifier.padding(12.dp)
+                                )
+                            }
+                        }
+
+                        Box(modifier = Modifier.weight(1f)) {
+                            AnimatedContent(
+                                targetState = activeTab,
+                                transitionSpec = {
+                                    fadeIn(animationSpec = tween(300)) togetherWith fadeOut(animationSpec = tween(300))
+                                },
+                                label = "tab_transition"
+                            ) { targetTab ->
+                                when (targetTab) {
+                                    AppTab.CPU -> CpuTopologyScreen(fileState = currentFile, viewModel = viewModel)
+                                    AppTab.DTS -> EditorScreen(fileState = currentFile, viewModel = viewModel)
+                                }
+                            }
                         }
                     }
-
-                    Box(modifier = Modifier.weight(1f)) {
-                        when (activeTab) {
-                            AppTab.CPU -> CpuTopologyScreen(fileState = currentFile, viewModel = viewModel)
-                            AppTab.DTS -> EditorScreen(fileState = currentFile, viewModel = viewModel)
-                        }
+                } else {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("This app is exclusively for MT6789 devices.")
                     }
                 }
             }
