@@ -2,11 +2,10 @@ package com.dtb.editor.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -28,8 +27,6 @@ fun EditorScreen(
         }
     }
 
-    val verticalScrollState = rememberScrollState()
-
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -40,7 +37,6 @@ fun EditorScreen(
             value = textState,
             onValueChange = { newText ->
                 textState = newText
-                viewModel.updateDtsText(newText)
             },
             textStyle = MaterialTheme.typography.bodyMedium.copy(
                 fontFamily = FontFamily.Monospace,
@@ -49,7 +45,11 @@ fun EditorScreen(
             ),
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(verticalScrollState)
+                .onFocusChanged { focusState ->
+                    if (!focusState.isFocused) {
+                        viewModel.updateDtsText(textState)
+                    }
+                }
         )
     }
 }
