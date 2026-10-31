@@ -1,3 +1,30 @@
 <resources>
     <string name="app_name">DTB Editor</string>
+    <string name="error_processing_dts">Failed to process DTS</string>
+    <string name="error_opening_stream">Failed to open file stream</string>
+    <string name="error_unrecognized_format">Unrecognized file format</string>
+    <string name="error_opening_file">Failed to open file</string>
+    <string name="error_loading_dtb_entry">Failed to load DTB entry</string>
+    <string name="error_applying_topology">Failed to apply topology: %1$s</string>
+    <string name="error_compiling_dts">Failed to compile DTS: %1$s</string>
+    <string name="error_recompiling_fdt">Compiled FDT cannot be decompiled</string>
+    <string name="error_missing_vb_header">Vendor boot header data not available</string>
+    <string name="error_save_verification">Verification before save failed</string>
+    <string name="error_saving_file">Failed to save file</string>
+    <string name="msg_saved">File saved successfully</string>
+    <string name="msg_topology_applied">Topology applied to DTS</string>
+    <string name="no_cpu_nodes_detected">No CPU nodes detected in this Device Tree.</string>
+    <string name="initializing_draft_topology">Initializing draft topology from current state</string>
+    <string name="error_invalid_vb_magic">Invalid vendor_boot magic</string>
+    <string name="error_unsupported_header_version">Header version not supported: v%1$d</string>
+    <string name="error_invalid_page_size">Invalid page size: %1$d (must be power of two and >= 4096)</string>
+    <string name="error_invalid_header_size">Invalid header size: %1$d (min %2$d)</string>
+    <string name="error_payload_exceeds_file">Vendor boot payload exceeds file size (%1$d > %2$d)</string>
+    <string name="error_unrecognized_dtb_format">Unrecognized DTB format (magic: 0x%1$s)</string>
+    <string name="error_invalid_fdt_totalsize">Invalid FDT totalsize (%1$d) at offset %2$d</string>
+    <string name="error_invalid_fdt_magic">Invalid FDT magic at offset %1$d: 0x%2$s</string>
+    <string name="error_no_valid_fdt_blob">No valid FDT blob found</string>
+    <string name="error_duplicate_slot_selection">Slots (%1$s) selected by more than one cluster</string>
+    <string name="error_failed_determining_slot_domain">Failed to determine slot domain</string>
+    <string name="error_only_topology_changes_detected">Only topology changes detected</string>
 </resources>

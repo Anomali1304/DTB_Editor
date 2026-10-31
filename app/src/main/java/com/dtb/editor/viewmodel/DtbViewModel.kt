@@ -113,7 +113,7 @@ class DtbViewModel(
                                 isModified = false
                             )
                         } catch (e: Exception) {
-                            _snackbarMessage.emit(e.message ?: "Gagal memproses DTS")
+                            _snackbarMessage.emit(e.message ?: "Failed to process DTS")
                         } finally {
                             _isProcessing.value = false
                         }
