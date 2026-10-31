@@ -74,7 +74,7 @@ fun CpuTopologyScreen(
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "Susunan CPU Saat Ini",
+                        text = stringResource(R.string.cpu_topology_title),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
@@ -87,7 +87,7 @@ fun CpuTopologyScreen(
                     if (top.controllerInfo != null) {
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Pengontrol cpufreq: ${top.controllerInfo.nodeName} (${top.controllerInfo.availableSlots.size} slot CSRAM)",
+                            text = stringResource(R.string.cpu_controller_label, top.controllerInfo.nodeName, top.controllerInfo.availableSlots.size),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -96,11 +96,11 @@ fun CpuTopologyScreen(
             }
         }
 
-        // 2. Preset Cepat
+        // 2. Quick Presets
         item {
             Column {
                 Text(
-                    text = "Preset Cepat",
+                    text = stringResource(R.string.quick_presets),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -133,7 +133,7 @@ fun CpuTopologyScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Penugasan Core ke Cluster",
+                        text = stringResource(R.string.core_to_cluster_assignment),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold
                     )
@@ -146,7 +146,7 @@ fun CpuTopologyScreen(
                                     draftConfigs = draftConfigs + ClusterConfig(nextIdx, emptyList())
                                 }
                             ) {
-                                Text("+ Cluster")
+                                Text(stringResource(R.string.add_cluster))
                             }
                         }
                         if (draftConfigs.size > 1 && draftConfigs.last().cpuIndices.isEmpty()) {
@@ -155,7 +155,7 @@ fun CpuTopologyScreen(
                                     draftConfigs = draftConfigs.dropLast(1)
                                 }
                             ) {
-                                Text("- Hapus C${draftConfigs.lastIndex}")
+                                Text(stringResource(R.string.delete_cluster, draftConfigs.lastIndex))
                             }
                         }
                     }
@@ -189,7 +189,7 @@ fun CpuTopologyScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "Slot CSRAM Pengontrol Frekuensi",
+                        text = stringResource(R.string.cluster_slot_selector_label),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold
                     )
@@ -217,14 +217,14 @@ fun CpuTopologyScreen(
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
-                            text = "Pratinjau Hasil Topologi",
+                            text = stringResource(R.string.preview_topology_title),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         for (cluster in preview.plan.clusters) {
                             val assigned = cluster.cpuIndices.mapNotNull { allCores.getOrNull(it)?.nodeName }
-                            val coresText = if (assigned.isNotEmpty()) assigned.joinToString(", ") else "(kosong)"
+                            val coresText = if (assigned.isNotEmpty()) assigned.joinToString(", ") else stringResource(R.string.empty_cluster_label)
                             val slot = preview.assignedSlots[cluster.clusterIndex]
                             val slotText = if (slot != null) " • slot 0x${slot.toString(16)}" else ""
                             Text(
@@ -289,7 +289,7 @@ fun CpuTopologyScreen(
                 enabled = isEnabled,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(if (isEnabled) "Apply to DTS" else "Apply (Fix Errors)")
+                Text(if (isEnabled) stringResource(R.string.apply_to_dts) else stringResource(R.string.apply_fix_errors))
             }
         }
     }
@@ -365,16 +365,16 @@ private fun ClusterSlotSelector(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text("Cluster $clusterIndex:", style = MaterialTheme.typography.bodyMedium)
+        Text(stringResource(R.string.cluster_index_label, clusterIndex), style = MaterialTheme.typography.bodyMedium)
 
         Box {
             OutlinedButton(onClick = { expanded = true }) {
                 val label = if (selectedSlot != null) {
                     "0x${selectedSlot.toString(16)}"
                 } else if (autoSlot != null) {
-                    "Otomatis (0x${autoSlot.toString(16)})"
+                    stringResource(R.string.automatic_slot, "0x${autoSlot.toString(16)}")
                 } else {
-                    "Otomatis"
+                    stringResource(R.string.automatic)
                 }
                 Text(label)
             }
@@ -384,7 +384,7 @@ private fun ClusterSlotSelector(
                 onDismissRequest = { expanded = false }
             ) {
                 DropdownMenuItem(
-                    text = { Text("Otomatis") },
+                    text = { Text(stringResource(R.string.automatic)) },
                     onClick = {
                         onSelectSlot(null)
                         expanded = false

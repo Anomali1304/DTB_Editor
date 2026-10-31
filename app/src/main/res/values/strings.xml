@@ -27,4 +27,19 @@
     <string name="error_duplicate_slot_selection">Slots (%1$s) selected by more than one cluster</string>
     <string name="error_failed_determining_slot_domain">Failed to determine slot domain</string>
     <string name="error_only_topology_changes_detected">Only topology changes detected</string>
+    <string name="cpu_topology_title">Current CPU Topology</string>
+    <string name="cpu_controller_label">Cpufreq controller: %1$s (%2$d slots CSRAM)</string>
+    <string name="quick_presets">Quick Presets</string>
+    <string name="core_to_cluster_assignment">Core to Cluster Assignment</string>
+    <string name="add_cluster">+ Cluster</string>
+    <string name="delete_cluster">- Delete C%1$d</string>
+    <string name="cluster_slot_selector_label">CSRAM Slots for Frequency Controller</string>
+    <string name="cluster_index_label">Cluster %1$d:</string>
+    <string name="automatic_slot">Automatic (%1$s)</string>
+    <string name="automatic">Automatic</string>
+    <string name="preview_topology_title">Topology Preview</string>
+    <string name="empty_cluster_label">(empty)</string>
+    <string name="apply_to_dts">Apply to DTS</string>
+    <string name="apply_fix_errors">Apply (Fix Errors)</string>
+    <string name="editor_info">%1$d parts (%2$d lines)</string>
 </resources>

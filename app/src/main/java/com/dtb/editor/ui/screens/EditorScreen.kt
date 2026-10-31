@@ -19,6 +19,8 @@ import androidx.compose.ui.unit.sp
 import com.dtb.editor.fdt.parser.DtsChunker
 import com.dtb.editor.viewmodel.DtbViewModel
 import com.dtb.editor.viewmodel.OpenFileState
+import androidx.compose.ui.res.stringResource
+import com.dtb.editor.R
 
 @Composable
 fun EditorScreen(
@@ -60,7 +62,7 @@ fun EditorScreen(
                 }
                 Spacer(modifier = Modifier.weight(1f))
                 Text(
-                    text = "${chunks.size} bagian (${chunks.sumOf { it.lines().size }} baris)",
+                    text = stringResource(R.string.editor_info, chunks.size, chunks.sumOf { it.lines().size }),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
