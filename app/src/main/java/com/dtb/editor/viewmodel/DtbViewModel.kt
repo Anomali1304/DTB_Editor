@@ -577,15 +577,21 @@ class DtbViewModel(
 
     fun getSuggestedFileName(): String {
         val current = _openFileState.value ?: return "output.dtb"
+        val sizes = try {
+            val fullText = DtsChunker.join(current.chunks)
+            val root = DtsParser().parse(fullText).rootNode
+            val top = topologyManager.extractTopology(root)
+            top.clusters.map { it.cores.size }
+        } catch (e: Exception) {
+            current.cpuTopology.clusters.map { it.cores.size }
+        }
+        val presetStr = if (sizes.isNotEmpty()) sizes.joinToString("+") else "topology"
+
         val rawName = current.fileName
         val dotIdx = rawName.lastIndexOf('.')
-        return if (dotIdx > 0) {
-            val base = rawName.substring(0, dotIdx)
-            val ext = rawName.substring(dotIdx + 1)
-            "${base}_mod.$ext"
-        } else {
-            "${rawName}_mod.${current.fileType.defaultExtension}"
-        }
+        val ext = if (dotIdx > 0) rawName.substring(dotIdx + 1) else current.fileType.defaultExtension
+
+        return "$presetStr.$ext"
     }
 
     private fun queryFileName(context: Context, uri: Uri): String {
