@@ -1,0 +1,192 @@
+    ) { innerPadding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        renderEffect = if (isProcessing) {
+                            android.graphics.RenderEffect.createBlurEffect(
+                                10f, 10f, android.graphics.Shader.TileMode.DECAL
+                            )
+                        } else null
+                    }
+            ) {
+                val currentFile = fileState
+                if (currentFile == null) {
+                    // Start Screen
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(24.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "DTB Editor",
+                            style = MaterialTheme.typography.headlineLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Inspect and modify CPU topology in device trees",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(32.dp))
+
+                        Button(
+                            onClick = { openLauncher.launch(arrayOf("*/*")) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(56.dp)
+                        ) {
+                            Icon(Icons.Default.FolderOpen, contentDescription = null)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(stringResource(R.string.import_vb), style = MaterialTheme.typography.titleMedium)
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        OutlinedButton(
+                            onClick = { openLauncher.launch(arrayOf("*/*")) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(56.dp)
+                        ) {
+                            Icon(Icons.Default.Code, contentDescription = null)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(stringResource(R.string.import_dtb), style = MaterialTheme.typography.titleMedium)
+                        }
+                    }
+                } else {
+                    // Work Screen
+                    val isMt6789 = currentFile.cpuTopology.model.equals("MT6789", ignoreCase = true)
+                    if (isMt6789) {
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            if (currentFile.hasAvbFooter) {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.errorContainer,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        text = "The AVB footer will be removed. Verification must already be disabled on the device.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onErrorContainer,
+                                        modifier = Modifier.padding(12.dp)
+                                    )
+                                }
+                            }
+
+                            Box(modifier = Modifier.weight(1f)) {
+                                AnimatedContent(
+                                    targetState = activeTab,
+                                    transitionSpec = {
+                                        fadeIn(animationSpec = tween(300)) togetherWith fadeOut(animationSpec = tween(300))
+                                    },
+                                    label = "tab_transition"
+                                ) { targetTab ->
+                                    when (targetTab) {
+                                        AppTab.CPU -> CpuTopologyScreen(fileState = currentFile, viewModel = viewModel)
+                                        AppTab.DTS -> EditorScreen(fileState = currentFile, viewModel = viewModel)
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "Unsupported device model: ${currentFile.cpuTopology.model}\nThis app is exclusively for MT6789.",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                }
+
+                if (pendingMulti != null) {
+                    AlertDialog(
+                        onDismissRequest = { viewModel.cancelMultiDtbSelection() },
+                        title = { Text("Select DTB Entry") },
+                        text = {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Select a DTB entry to edit:")
+                                for (entry in pendingMulti!!.dtbEntries) {
+                                    Surface(
+                                        shape = MaterialTheme.shapes.small,
+                                        color = MaterialTheme.colorScheme.surfaceVariant,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(entry.displayLabel, style = MaterialTheme.typography.bodyMedium)
+                                            TextButton(onClick = { viewModel.selectDtbEntry(entry.index) }) {
+                                                Text("Open")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        confirmButton = {},
+                        dismissButton = {
+                            TextButton(onClick = { viewModel.cancelMultiDtbSelection() }) {
+                                Text("Cancel")
+                            }
+                        }
+                    )
+                }
+            }
+
+            // Solid loading popup overlay
+            if (isProcessing) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.2f))
+                        .clickable(
+                            indication = null,
+                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                        ) {},
+                    contentAlignment = Alignment.Center
+                ) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface,
+                        shape = RoundedCornerShape(20.dp),
+                        tonalElevation = 12.dp,
+                        modifier = Modifier.padding(32.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(28.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(48.dp)
+                            )
+                            Text(
+                                text = "Memproses Berkas...",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Mohon tunggu sebentar...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        }
