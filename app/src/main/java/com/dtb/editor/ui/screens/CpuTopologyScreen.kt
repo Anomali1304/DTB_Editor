@@ -2,30 +2,40 @@ package com.dtb.editor.ui.screens
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.dtb.editor.R
 import com.dtb.editor.fdt.cpu.ClusterConfig
 import com.dtb.editor.fdt.cpu.CpuCoreDetail
-import com.dtb.editor.fdt.cpu.CpuTopologyState
 import com.dtb.editor.fdt.cpu.TopologyPreviewResult
 import com.dtb.editor.viewmodel.DtbViewModel
 import com.dtb.editor.viewmodel.OpenFileState
-import androidx.compose.ui.res.stringResource
-import com.dtb.editor.R
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -124,32 +134,63 @@ fun CpuTopologyScreen(
             .fillMaxSize()
             .padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
-        contentPadding = PaddingValues(vertical = 16.dp)
+        contentPadding = PaddingValues(top = 16.dp, bottom = 32.dp)
     ) {
-        // 1. Ringkasan Susunan Sekarang
+        // 1. Chipset & Summary Header Card
         item {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            ElevatedCard(
+                colors = CardDefaults.elevatedCardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                ),
+                shape = RoundedCornerShape(16.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .animateContentSize()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = stringResource(R.string.cpu_topology_title),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    val clusterSummary = top.clusters.joinToString(" + ") { "${it.cores.size}" }
-                    Text(
-                        text = "$totalCores Core • ${top.clusters.size} Cluster ($clusterSummary)",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Memory,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Text(
+                                text = "MediaTek MT6789",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        val activeClustersCount = draftConfigs.size
+                        val clusterSum = draftConfigs.joinToString(" + ") { "${it.cpuIndices.size}" }
+                        Surface(
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = "$activeClustersCount Cluster ($clusterSum)",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
                     if (top.controllerInfo != null) {
-                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = stringResource(R.string.cpu_controller_label, top.controllerInfo.nodeName, top.controllerInfo.availableSlots.size),
+                            text = "Controller: ${top.controllerInfo.nodeName} • 3 Performance Domains",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -158,70 +199,25 @@ fun CpuTopologyScreen(
             }
         }
 
-        // 2. Quick Presets
+        // 2. Topology Presets with Quick Action
         item {
             Column {
-                Text(
-                    text = stringResource(R.string.quick_presets),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    val presets = getApplicablePresets(totalCores)
-                    for (preset in presets) {
-                        val isSelected = preset == selectedPreset
-                        val containerColor by animateColorAsState(
-                            targetValue = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                            animationSpec = spring(stiffness = 300f, dampingRatio = 0.6f)
-                        )
-                        SuggestionChip(
-                            onClick = {
-                                val newConfigs = createConfigsFromSizes(preset, totalCores)
-                                draftConfigs = newConfigs
-                                selectedPreset = preset
-                                val newPreview = viewModel.previewPlan(newConfigs, syncCpufreq)
-                                customCapacities = autoTuneCapacities(newConfigs, newPreview)
-                            },
-                            label = { Text(preset.joinToString("+")) },
-                            colors = SuggestionChipDefaults.suggestionChipColors(
-                                containerColor = containerColor
-                            )
-                        )
-                    }
-                }
-            }
-        }
-
-        // 3. Matriks Penugasan CPU
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = stringResource(R.string.core_to_cluster_assignment),
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = stringResource(R.string.capacity_info),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                        )
-                    }
+                    Text(
+                        text = stringResource(R.string.quick_presets),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
                     TextButton(
                         onClick = {
                             customCapacities = autoTuneCapacities(draftConfigs, preview)
-                        }
+                        },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Tune,
@@ -231,99 +227,133 @@ fun CpuTopologyScreen(
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = stringResource(R.string.auto_calculate_capacities),
-                            style = MaterialTheme.typography.labelMedium
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 }
 
-                // Baris per CPU
-                for (cpu in allCores) {
-                    val assignedCluster = draftConfigs.firstOrNull { it.cpuIndices.contains(cpu.index) }?.clusterIndex ?: 0
-                    val capVal = customCapacities[cpu.index] ?: cpu.capacity ?: (if (cpu.microarch.contains("a76", ignoreCase = true)) 1024L else 383L)
-                    CpuAssignmentRow(
-                        core = cpu,
-                        currentCluster = assignedCluster,
-                        capacity = capVal,
-                        onCapacityChange = { newCap ->
-                            customCapacities = customCapacities + (cpu.index to newCap)
-                        }
-                    )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val presets = getApplicablePresets(totalCores)
+                    for (preset in presets) {
+                        val isSelected = preset == selectedPreset
+                        val label = if (preset == listOf(6, 2)) "6+2 (Stock)" else preset.joinToString("+")
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = {
+                                val newConfigs = createConfigsFromSizes(preset, totalCores)
+                                draftConfigs = newConfigs
+                                selectedPreset = preset
+                                val newPreview = viewModel.previewPlan(newConfigs, syncCpufreq)
+                                customCapacities = autoTuneCapacities(newConfigs, newPreview)
+                            },
+                            label = {
+                                Text(
+                                    text = label,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
+                            leadingIcon = if (isSelected) {
+                                {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            } else null,
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                    }
                 }
             }
         }
 
-        // 4. Pengaturan Slot CSRAM per Cluster
-        if (syncCpufreq && top.controllerInfo != null) {
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = stringResource(R.string.cluster_slot_selector_label),
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        shape = MaterialTheme.shapes.small,
-                        modifier = Modifier.fillMaxWidth()
+        // 3. Structured Cluster Cards (Grouped Cores + CSRAM Frequency Domain)
+        items(draftConfigs, key = { it.clusterIndex }) { cluster ->
+            val clusterCores = cluster.cpuIndices.mapNotNull { allCores.getOrNull(it) }
+            val autoSlot = preview?.assignedSlots?.get(cluster.clusterIndex)
+            val archSummary = clusterCores.map { it.microarch.replace("arm,", "") }
+                .filter { it.isNotBlank() }
+                .distinct()
+                .joinToString("/")
+
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                ),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .animateContentSize()
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    // Cluster Card Header
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
                             Text(
-                                text = stringResource(R.string.slot_freq_info_title),
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                text = "Cluster ${cluster.clusterIndex}",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
                             )
-                            Text(
-                                text = stringResource(R.string.slot_freq_info),
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                    for (cluster in draftConfigs) {
-                        val autoSlot = preview?.assignedSlots?.get(cluster.clusterIndex)
-                        ClusterSlotSelector(
-                            clusterIndex = cluster.clusterIndex,
-                            selectedSlot = cluster.selectedDomainSlot,
-                            autoSlot = autoSlot,
-                            availableSlots = top.controllerInfo.availableSlots,
-                            onSelectSlot = { newSlot ->
-                                draftConfigs = draftConfigs.map {
-                                    if (it.clusterIndex == cluster.clusterIndex) it.copy(selectedDomainSlot = newSlot) else it
-                                }
+                            Surface(
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text(
+                                    text = "${clusterCores.size} Core" + (if (archSummary.isNotBlank()) " • $archSummary" else ""),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
                             }
-                        )
-                    }
-                }
-            }
-        }
+                        }
 
-        // 5. Pratinjau Hasil
-        if (preview != null && preview.plan.clusters.isNotEmpty()) {
-            item {
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(
-                            text = stringResource(R.string.preview_topology_title),
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        for (cluster in preview.plan.clusters) {
-                            val assigned = cluster.cpuIndices.mapNotNull { allCores.getOrNull(it) }
-                            val coresText = if (assigned.isNotEmpty()) {
-                                assigned.joinToString(", ") { core ->
-                                    val cap = customCapacities[core.index] ?: core.capacity
-                                    "${core.nodeName}${if (cap != null) " (cap $cap)" else ""}"
+                        // Compact Frequency Slot Picker for this cluster
+                        if (syncCpufreq && top.controllerInfo != null) {
+                            CompactSlotDropdown(
+                                selectedSlot = cluster.selectedDomainSlot,
+                                autoSlot = autoSlot,
+                                availableSlots = top.controllerInfo.availableSlots,
+                                onSelectSlot = { newSlot ->
+                                    draftConfigs = draftConfigs.map {
+                                        if (it.clusterIndex == cluster.clusterIndex) it.copy(selectedDomainSlot = newSlot) else it
+                                    }
                                 }
-                            } else stringResource(R.string.empty_cluster_label)
-                            val slot = preview.assignedSlots[cluster.clusterIndex]
-                            val slotText = if (slot != null) " • slot ${formatSlotLabel(slot)}" else ""
-                            Text(
-                                text = "Cluster ${cluster.clusterIndex}: $coresText$slotText",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Cores inside this cluster
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for (cpu in clusterCores) {
+                            val capVal = customCapacities[cpu.index] ?: cpu.capacity ?: if (cpu.microarch.contains("a76", ignoreCase = true)) 1024L else 383L
+                            CoreRowItem(
+                                core = cpu,
+                                capacity = capVal,
+                                onCapacityChange = { newCap ->
+                                    customCapacities = customCapacities + (cpu.index to newCap)
+                                }
                             )
                         }
                     }
@@ -331,12 +361,13 @@ fun CpuTopologyScreen(
             }
         }
 
-        // 6. Inline Errors & Warnings
+        // 4. Inline Errors & Warnings (if any)
         if (preview != null) {
             if (preview.errors.isNotEmpty()) {
                 item {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -356,6 +387,7 @@ fun CpuTopologyScreen(
                 item {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -372,7 +404,7 @@ fun CpuTopologyScreen(
             }
         }
 
-        // 7. Apply Button
+        // 5. Primary Apply Button
         item {
             val isEnabled = preview != null && preview.isValid && draftConfigs.isNotEmpty()
             Button(
@@ -380,117 +412,104 @@ fun CpuTopologyScreen(
                     viewModel.applyCustomPlan(draftConfigs, syncCpufreq, customCapacities)
                 },
                 enabled = isEnabled,
-                modifier = Modifier.fillMaxWidth()
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp)
             ) {
-                Text(if (isEnabled) stringResource(R.string.apply_to_dts) else stringResource(R.string.apply_fix_errors))
+                Text(
+                    text = if (isEnabled) stringResource(R.string.apply_to_dts) else stringResource(R.string.apply_fix_errors),
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleSmall
+                )
             }
         }
     }
 }
 
 @Composable
-private fun CpuAssignmentRow(
+private fun CoreRowItem(
     core: CpuCoreDetail,
-    currentCluster: Int,
     capacity: Long,
     onCapacityChange: (Long) -> Unit
 ) {
-    Surface(
-        tonalElevation = 1.dp,
-        shape = MaterialTheme.shapes.small,
-        modifier = Modifier.fillMaxWidth()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+        Column {
+            Text(
+                text = core.nodeName,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+            )
+            val arch = core.microarch.replace("arm,", "")
+            if (arch.isNotBlank()) {
+                Text(
+                    text = arch,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        // Capacity Stepper
+        Surface(
+            color = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(8.dp),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 2.dp, vertical = 2.dp)
+            ) {
+                IconButton(
+                    onClick = { onCapacityChange((capacity - 25L).coerceAtLeast(100L)) },
+                    modifier = Modifier.size(32.dp),
+                    enabled = capacity > 100L
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowDown,
+                        contentDescription = "Decrease capacity",
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.widthIn(min = 40.dp)
                 ) {
                     Text(
-                        text = core.nodeName,
-                        style = MaterialTheme.typography.bodyMedium,
+                        text = "$capacity",
+                        style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.primary,
+                        textAlign = TextAlign.Center
                     )
-                    Surface(
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        shape = MaterialTheme.shapes.extraSmall
-                    ) {
-                        Text(
-                            text = "Cluster $currentCluster",
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-                    }
-                }
-                val arch = if (core.microarch.isNotBlank()) core.microarch.replace("arm,", "") else ""
-                if (arch.isNotBlank()) {
                     Text(
-                        text = arch,
-                        style = MaterialTheme.typography.bodySmall,
+                        text = "cap",
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-            }
 
-            // Capacity Stepper with Down arrow, capacity number, and Up arrow
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                shape = MaterialTheme.shapes.medium
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                IconButton(
+                    onClick = { onCapacityChange((capacity + 25L).coerceAtMost(1024L)) },
+                    modifier = Modifier.size(32.dp),
+                    enabled = capacity < 1024L
                 ) {
-                    IconButton(
-                        onClick = { onCapacityChange((capacity - 25L).coerceAtLeast(100L)) },
-                        modifier = Modifier.size(32.dp),
-                        enabled = capacity > 100L
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.KeyboardArrowDown,
-                            contentDescription = "Decrease capacity",
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.widthIn(min = 44.dp)
-                    ) {
-                        Text(
-                            text = "$capacity",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            text = "cap",
-                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    IconButton(
-                        onClick = { onCapacityChange((capacity + 25L).coerceAtMost(1024L)) },
-                        modifier = Modifier.size(32.dp),
-                        enabled = capacity < 1024L
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.KeyboardArrowUp,
-                            contentDescription = "Increase capacity",
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowUp,
+                        contentDescription = "Increase capacity",
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
             }
         }
@@ -498,71 +517,78 @@ private fun CpuAssignmentRow(
 }
 
 @Composable
-private fun ClusterSlotSelector(
-    clusterIndex: Int,
+private fun CompactSlotDropdown(
     selectedSlot: Long?,
     autoSlot: Long?,
     availableSlots: List<Long>,
     onSelectSlot: (Long?) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val activeSlot = selectedSlot ?: autoSlot
+    val slotLabel = if (selectedSlot != null) {
+        val freq = getSlotFrequencyRange(selectedSlot)
+        if (freq.isNotBlank()) freq else "0x${selectedSlot.toString(16)}"
+    } else if (autoSlot != null) {
+        val freq = getSlotFrequencyRange(autoSlot)
+        if (freq.isNotBlank()) freq else "0x${autoSlot.toString(16)}"
+    } else {
+        "Auto"
+    }
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-            Text(
-                stringResource(R.string.cluster_index_label, clusterIndex),
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-            val currentSlot = selectedSlot ?: autoSlot
-            if (currentSlot != null) {
-                val freq = getSlotFrequencyRange(currentSlot)
-                if (freq.isNotEmpty()) {
-                    Text(
-                        freq,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
+    Box {
+        Surface(
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.clickable { expanded = true }
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Speed,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+                Text(
+                    text = slotLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+                Icon(
+                    imageVector = Icons.Default.ArrowDropDown,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                )
             }
         }
 
-        Box {
-            OutlinedButton(onClick = { expanded = true }) {
-                val label = if (selectedSlot != null) {
-                    formatSlotLabel(selectedSlot)
-                } else if (autoSlot != null) {
-                    stringResource(R.string.automatic_slot, formatSlotLabel(autoSlot))
-                } else {
-                    stringResource(R.string.automatic)
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            DropdownMenuItem(
+                text = { Text("Auto (${if (autoSlot != null) getSlotFrequencyRange(autoSlot) else "Default"})") },
+                onClick = {
+                    onSelectSlot(null)
+                    expanded = false
                 }
-                Text(label, style = MaterialTheme.typography.bodySmall)
-            }
-
-            DropdownMenu(
-                expanded = expanded,
-                onDismissRequest = { expanded = false }
-            ) {
+            )
+            for (slot in availableSlots) {
+                val hex = "0x" + slot.toString(16)
+                val freq = getSlotFrequencyRange(slot)
+                val label = if (freq.isNotEmpty()) "$freq ($hex)" else hex
                 DropdownMenuItem(
-                    text = { Text(stringResource(R.string.automatic)) },
+                    text = { Text(label) },
                     onClick = {
-                        onSelectSlot(null)
+                        onSelectSlot(slot)
                         expanded = false
                     }
                 )
-                for (slot in availableSlots) {
-                    DropdownMenuItem(
-                        text = { Text(formatSlotLabel(slot)) },
-                        onClick = {
-                            onSelectSlot(slot)
-                            expanded = false
-                        }
-                    )
-                }
             }
         }
     }
@@ -578,15 +604,9 @@ private fun getSlotFrequencyRange(slot: Long): String {
     }
 }
 
-private fun formatSlotLabel(slot: Long): String {
-    val hex = "0x" + slot.toString(16)
-    val freq = getSlotFrequencyRange(slot)
-    return if (freq.isNotEmpty()) "$hex ($freq)" else hex
-}
-
 private fun getApplicablePresets(totalCores: Int): List<List<Int>> {
     return when (totalCores) {
-        8 -> listOf(listOf(4, 4), listOf(4, 2, 2), listOf(2, 3, 3), listOf(6, 2), listOf(4, 3, 1))
+        8 -> listOf(listOf(6, 2), listOf(4, 4), listOf(4, 2, 2), listOf(2, 3, 3), listOf(4, 3, 1))
         6 -> listOf(listOf(4, 2), listOf(2, 2, 2), listOf(3, 3))
         4 -> listOf(listOf(2, 2), listOf(4), listOf(1, 1, 1, 1))
         else -> listOf(listOf(totalCores))

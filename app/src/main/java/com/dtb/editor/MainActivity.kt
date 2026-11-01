@@ -104,14 +104,11 @@ fun MainScreen(viewModel: DtbViewModel = viewModel()) {
     }
 
     // SAF Save Launcher
-    var bytesToSave by remember { mutableStateOf<ByteArray?>(null) }
     val saveLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("*/*")
     ) { uri ->
-        val bytes = bytesToSave
-        if (uri != null && bytes != null) {
-            viewModel.writeSavedFile(uri, context, bytes)
-            bytesToSave = null
+        if (uri != null) {
+            viewModel.saveToUri(uri, context)
         }
     }
 
@@ -140,11 +137,7 @@ fun MainScreen(viewModel: DtbViewModel = viewModel()) {
                     actions = {
                         IconButton(
                             onClick = {
-                                val prepared = viewModel.prepareSaveBytes()
-                                if (prepared != null) {
-                                    bytesToSave = prepared
-                                    saveLauncher.launch(viewModel.getSuggestedFileName())
-                                }
+                                saveLauncher.launch(viewModel.getSuggestedFileName())
                             },
                             enabled = !isProcessing
                         ) {

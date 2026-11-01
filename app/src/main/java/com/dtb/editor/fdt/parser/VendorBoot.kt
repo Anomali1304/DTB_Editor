@@ -271,13 +271,10 @@ class VendorBoot {
             newDtbOffset + roundUp(newDtbSize, pSize)
         }
 
-        if (newEndOffset > image.originalFileSize) {
-            throw VendorBootException("Ukuran hasil melebihi file asli ($newEndOffset > ${image.originalFileSize})")
-        }
-
-        // Pad to original file size
-        if (newEndOffset < image.originalFileSize) {
-            val diff = image.originalFileSize - newEndOffset
+        // Pad to original file size (or keep new size if it expanded)
+        val targetSize = maxOf(image.originalFileSize, newEndOffset)
+        if (newEndOffset < targetSize) {
+            val diff = targetSize - newEndOffset
             val zeroBuf = ByteArray(4096)
             var rem = diff
             while (rem > 0) {

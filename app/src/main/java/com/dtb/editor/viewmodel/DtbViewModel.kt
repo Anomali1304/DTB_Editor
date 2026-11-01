@@ -447,27 +447,122 @@ class DtbViewModel(
         }
     }
 
-    fun writeSavedFile(uri: Uri, context: Context, bytes: ByteArray) {
+    fun saveToUri(uri: Uri, context: Context) {
+        val current = _openFileState.value ?: return
         viewModelScope.launch {
             _isProcessing.value = true
             withContext(Dispatchers.IO) {
                 try {
-                    val stream = context.contentResolver.openOutputStream(uri)
-                        ?: throw Exception("Failed to open file tujuan simpan")
-                    stream.use { it.write(bytes) }
+                    val fullText = DtsChunker.join(current.chunks)
+                    val bytesToSave = if (fullText == current.originalDtsText && !current.isModified) {
+                        current.originalBytes
+                    } else {
+                        val compileResult = dtcEngine.compileDtsText(fullText)
+                        if (!compileResult.success || compileResult.compiledBytes == null) {
+                            throw Exception("Kompilasi DTS gagal: ${compileResult.log}")
+                        }
+                        val newFdtBytes = compileResult.compiledBytes
 
-                    val current = _openFileState.value
-                    if (current != null) {
-                        val fullText = DtsChunker.join(current.chunks)
-                        _openFileState.value = current.copy(
-                            originalDtsText = fullText,
-                            currentDtsText = fullText,
-                            isModified = false
+                        val decompileCheck = dtcEngine.decompileBytes(newFdtBytes)
+                        if (decompileCheck.isFailure) {
+                            throw Exception("Compiled FDT cannot be decompiled")
+                        }
+
+                        val newDtbBytes = dtbPayloadHelper.rebuild(
+                            current.dtbPayloadStructure,
+                            current.selectedEntryIndex,
+                            newFdtBytes
                         )
+
+                        when (current.fileType) {
+                            InputFileType.VENDOR_BOOT -> {
+                                val vbImage = current.vendorBootImage
+                                    ?: throw Exception("Vendor boot header data not available")
+                                val repacked = vendorBoot.repackToBytes(current.originalBytes, vbImage, newDtbBytes)
+
+                                val verifyParsed = vendorBoot.parse(repacked)
+                                val origRamdiskSha = vbImage.ramdiskSha256
+                                val newRamdiskSha = verifyParsed.ramdiskSha256
+                                if (!origRamdiskSha.contentEquals(newRamdiskSha)) {
+                                    throw Exception("Verifikasi integritas ramdisk gagal")
+                                }
+
+                                if (vbImage.header.headerVersion >= 4) {
+                                    if (vbImage.ramdiskTableSha256 != null && !vbImage.ramdiskTableSha256.contentEquals(verifyParsed.ramdiskTableSha256)) {
+                                        throw Exception("Verifikasi ramdisk table gagal")
+                                    }
+                                    if (vbImage.bootconfigSha256 != null && !vbImage.bootconfigSha256.contentEquals(verifyParsed.bootconfigSha256)) {
+                                        throw Exception("Verifikasi bootconfig gagal")
+                                    }
+                                }
+
+                                val (_, repackedEntries) = dtbPayloadHelper.parseStructure(verifyParsed.dtbBytes)
+                                for (i in current.dtbEntries.indices) {
+                                    if (i != current.selectedEntryIndex) {
+                                        val origEntryBytes = current.dtbEntries[i].fdtBytes
+                                        val repackedEntryBytes = repackedEntries.getOrNull(i)?.fdtBytes
+                                        if (repackedEntryBytes == null || !origEntryBytes.contentEquals(repackedEntryBytes)) {
+                                            throw Exception("Another DTB entry changed during repack")
+                                        }
+                                    }
+                                }
+
+                                repacked
+                            }
+                            InputFileType.DT_TABLE -> {
+                                val (_, rebuiltEntries) = dtbPayloadHelper.parseStructure(newDtbBytes)
+                                for (i in current.dtbEntries.indices) {
+                                    if (i != current.selectedEntryIndex) {
+                                        val origEntryBytes = current.dtbEntries[i].fdtBytes
+                                        val rebuiltEntryBytes = rebuiltEntries.getOrNull(i)?.fdtBytes
+                                        if (rebuiltEntryBytes == null || !origEntryBytes.contentEquals(rebuiltEntryBytes)) {
+                                            throw Exception("Another DTB entry changed during DT table reconstruction")
+                                        }
+                                    }
+                                }
+                                newDtbBytes
+                            }
+                            InputFileType.RAW_FDT -> {
+                                if (current.dtbEntries.size > 1) {
+                                    val (_, rebuiltEntries) = dtbPayloadHelper.parseStructure(newDtbBytes)
+                                    for (i in current.dtbEntries.indices) {
+                                        if (i != current.selectedEntryIndex) {
+                                            val origEntryBytes = current.dtbEntries[i].fdtBytes
+                                            val rebuiltEntryBytes = rebuiltEntries.getOrNull(i)?.fdtBytes
+                                            if (rebuiltEntryBytes == null || !origEntryBytes.contentEquals(rebuiltEntryBytes)) {
+                                                throw Exception("Another FDT entry changed during reconstruction")
+                                            }
+                                        }
+                                    }
+                                }
+                                newDtbBytes
+                            }
+                        }
                     }
+
+                    val stream = context.contentResolver.openOutputStream(uri, "wt")
+                        ?: context.contentResolver.openOutputStream(uri)
+                        ?: throw Exception("Failed to open file destination")
+
+                    stream.use { out ->
+                        val bufferSize = 64 * 1024
+                        var offset = 0
+                        while (offset < bytesToSave.size) {
+                            val chunkLen = minOf(bufferSize, bytesToSave.size - offset)
+                            out.write(bytesToSave, offset, chunkLen)
+                            offset += chunkLen
+                        }
+                        out.flush()
+                    }
+
+                    _openFileState.value = current.copy(
+                        originalDtsText = fullText,
+                        currentDtsText = fullText,
+                        isModified = false
+                    )
                     _snackbarMessage.emit("File saved successfully")
                 } catch (e: Exception) {
-                    _snackbarMessage.emit(e.message ?: "Failed to save file")
+                    _snackbarMessage.emit("Save failed: ${e.message}")
                 } finally {
                     _isProcessing.value = false
                 }
