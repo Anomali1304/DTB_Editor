@@ -8,7 +8,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.FolderOpen
@@ -174,9 +176,6 @@ fun MainScreen(viewModel: DtbViewModel = viewModel()) {
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            if (isProcessing) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            }
 
             val currentFile = fileState
             if (currentFile == null) {
@@ -294,6 +293,49 @@ fun MainScreen(viewModel: DtbViewModel = viewModel()) {
                         }
                     }
                 )
+            }
+
+            // Transparent blurred loading popup overlay
+            if (isProcessing) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.45f))
+                        .clickable(
+                            indication = null,
+                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                        ) {},
+                    contentAlignment = Alignment.Center
+                ) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+                        shape = RoundedCornerShape(20.dp),
+                        tonalElevation = 12.dp,
+                        modifier = Modifier.padding(32.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(28.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(48.dp)
+                            )
+                            Text(
+                                text = "Memproses Berkas...",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Mohon tunggu sebentar...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
             }
         }
     }

@@ -30,6 +30,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlinx.coroutines.delay
 import com.dtb.editor.R
 import com.dtb.editor.fdt.cpu.ClusterConfig
 import com.dtb.editor.fdt.cpu.CpuCoreDetail
@@ -244,7 +248,15 @@ fun CpuTopologyScreen(
                     val presets = getApplicablePresets(totalCores)
                     for (preset in presets) {
                         val isSelected = preset == selectedPreset
-                        val label = if (preset == listOf(6, 2)) "6+2 (Stock)" else preset.joinToString("+")
+                        val label = when (preset) {
+                            listOf(6, 2) -> "6+2 (Stock)"
+                            listOf(4, 4) -> "4+4 (Balanced)"
+                            listOf(4, 2, 2) -> "4+2+2 (Tri)"
+                            listOf(2, 6) -> "2+6 (Inverted)"
+                            listOf(2, 2, 4) -> "2+2+4 (Tri-Perf)"
+                            listOf(2, 2, 2, 2) -> "2+2+2+2 (Quad)"
+                            else -> preset.joinToString("+")
+                        }
                         FilterChip(
                             selected = isSelected,
                             onClick = {
@@ -459,7 +471,7 @@ private fun CoreRowItem(
             }
         }
 
-        // Capacity Stepper
+        // Capacity Stepper with Hold-to-Repeat
         Surface(
             color = MaterialTheme.colorScheme.surface,
             shape = RoundedCornerShape(8.dp),
@@ -469,17 +481,12 @@ private fun CoreRowItem(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(horizontal = 2.dp, vertical = 2.dp)
             ) {
-                IconButton(
-                    onClick = { onCapacityChange((capacity - 25L).coerceAtLeast(100L)) },
-                    modifier = Modifier.size(32.dp),
-                    enabled = capacity > 100L
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.KeyboardArrowDown,
-                        contentDescription = "Decrease capacity",
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
+                RepeatingButton(
+                    imageVector = Icons.Default.KeyboardArrowDown,
+                    contentDescription = "Decrease capacity",
+                    enabled = capacity > 100L,
+                    onClick = { onCapacityChange((capacity - 25L).coerceAtLeast(100L)) }
+                )
 
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -500,19 +507,64 @@ private fun CoreRowItem(
                     )
                 }
 
-                IconButton(
-                    onClick = { onCapacityChange((capacity + 25L).coerceAtMost(1024L)) },
-                    modifier = Modifier.size(32.dp),
-                    enabled = capacity < 1024L
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.KeyboardArrowUp,
-                        contentDescription = "Increase capacity",
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
+                RepeatingButton(
+                    imageVector = Icons.Default.KeyboardArrowUp,
+                    contentDescription = "Increase capacity",
+                    enabled = capacity < 1024L,
+                    onClick = { onCapacityChange((capacity + 25L).coerceAtMost(1024L)) }
+                )
             }
         }
+    }
+}
+
+@Composable
+private fun RepeatingButton(
+    imageVector: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    var isPressed by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isPressed, enabled) {
+        if (isPressed && enabled) {
+            onClick()
+            delay(350L) // initial delay before repeating when holding down
+            while (isPressed && enabled) {
+                onClick()
+                delay(70L) // repeat interval
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .size(32.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(
+                enabled = enabled,
+                onClick = {}
+            )
+            .pointerInput(enabled) {
+                if (!enabled) return@pointerInput
+                awaitPointerEventScope {
+                    while (true) {
+                        val down = awaitFirstDown(false)
+                        isPressed = true
+                        val up = waitForUpOrCancellation()
+                        isPressed = false
+                    }
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = imageVector,
+            contentDescription = contentDescription,
+            modifier = Modifier.size(18.dp),
+            tint = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+        )
     }
 }
 
@@ -606,7 +658,16 @@ private fun getSlotFrequencyRange(slot: Long): String {
 
 private fun getApplicablePresets(totalCores: Int): List<List<Int>> {
     return when (totalCores) {
-        8 -> listOf(listOf(6, 2), listOf(4, 4), listOf(4, 2, 2), listOf(2, 3, 3), listOf(4, 3, 1))
+        8 -> listOf(
+            listOf(6, 2),
+            listOf(4, 4),
+            listOf(4, 2, 2),
+            listOf(2, 6),
+            listOf(2, 2, 4),
+            listOf(2, 3, 3),
+            listOf(2, 2, 2, 2),
+            listOf(4, 3, 1)
+        )
         6 -> listOf(listOf(4, 2), listOf(2, 2, 2), listOf(3, 3))
         4 -> listOf(listOf(2, 2), listOf(4), listOf(1, 1, 1, 1))
         else -> listOf(listOf(totalCores))
