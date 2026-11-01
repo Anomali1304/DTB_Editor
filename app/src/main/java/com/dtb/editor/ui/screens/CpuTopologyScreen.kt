@@ -4,6 +4,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -156,6 +157,14 @@ fun CpuTopologyScreen(
                 Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     getApplicablePresets(totalCores).forEach { preset ->
                         val isSelected = preset == selectedPreset
+                        val label = when (preset) {
+                            listOf(6, 2) -> "6+2 (Stock)"
+                            listOf(4, 4) -> "4+4 (Balanced)"
+                            listOf(4, 2, 2) -> "4+2+2 (Tri-Cluster)"
+                            listOf(2, 6) -> "2+6 (Inverted)"
+                            listOf(2, 2, 4) -> "2+2+4 (Tri-Performance)"
+                            else -> preset.joinToString("+")
+                        }
                         FilterChip(
                             selected = isSelected,
                             onClick = {
@@ -165,7 +174,7 @@ fun CpuTopologyScreen(
                                 val newPreview = viewModel.previewPlan(newConfigs, syncCpufreq)
                                 customCapacities = autoTuneCapacities(newConfigs, newPreview)
                             },
-                            label = { Text(when(preset){ listOf(6,2)->"6+2 (Stock)"; listOf(4,4)->"4+4 (Bal)"; listOf(4,2,2)->"4+2+2 (Tri)"; listOf(2,6)->"2+6 (Inv)"; listOf(2,2,4)->"2+2+4 (Tri-Perf)"; else->preset.joinToString("+") }, fontWeight = if(isSelected) FontWeight.Bold else FontWeight.Normal) },
+                            label = { Text(label, fontWeight = if(isSelected) FontWeight.Bold else FontWeight.Normal) },
                             leadingIcon = if (isSelected) { { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) } } else null,
                             shape = RoundedCornerShape(10.dp)
                         )
@@ -272,10 +281,16 @@ private fun RepeatingButton(imageVector: androidx.compose.ui.graphics.vector.Ima
         }
     }
     Box(
-        modifier = Modifier.size(32.dp).clip(RoundedCornerShape(6.dp)).clickable(enabled = enabled, onClick = onClick).pointerInput(enabled) {
-            awaitPointerEventScope {
-                while (true) { awaitFirstDown(false); isPressed = true; waitForUpOrCancellation(); isPressed = false }
-            }
+        modifier = Modifier.size(32.dp).clip(RoundedCornerShape(6.dp)).pointerInput(enabled) {
+            detectTapGestures(
+                onPress = {
+                    if (enabled) {
+                        isPressed = true
+                        tryAwaitRelease()
+                        isPressed = false
+                    }
+                }
+            )
         },
         contentAlignment = Alignment.Center
     ) {
