@@ -1,39 +1,15 @@
 <resources>
     <string name="app_name">DTB Editor</string>
-    <string name="error_processing_dts">Failed to process DTS</string>
-    <string name="error_opening_stream">Failed to open file stream</string>
-    <string name="error_unrecognized_format">Unrecognized file format</string>
-    <string name="error_opening_file">Failed to open file</string>
-    <string name="error_loading_dtb_entry">Failed to load DTB entry</string>
-    <string name="error_applying_topology">Failed to apply topology: %1$s</string>
-    <string name="error_compiling_dts">Failed to compile DTS: %1$s</string>
-    <string name="error_recompiling_fdt">Compiled FDT cannot be decompiled</string>
-    <string name="error_missing_vb_header">Vendor boot header data not available</string>
-    <string name="error_save_verification">Verification before save failed</string>
-    <string name="error_saving_file">Failed to save file</string>
-    <string name="msg_saved">File saved successfully</string>
-    <string name="msg_topology_applied">Topology applied successfully</string>
     <string name="no_cpu_nodes_detected">No CPU nodes detected in this Device Tree.</string>
-    <string name="initializing_draft_topology">Initializing draft topology</string>
-    <string name="error_invalid_vb_magic">Invalid vendor_boot magic</string>
-    <string name="error_unsupported_header_version">Header version not supported: v%1$d</string>
-    <string name="error_invalid_page_size">Invalid page size: %1$d (must be power of two and >= 4096)</string>
-    <string name="error_invalid_header_size">Invalid header size: %1$d (min %2$d)</string>
-    <string name="error_payload_exceeds_file">Vendor boot payload exceeds file size (%1$d > %2$d)</string>
-    <string name="error_unrecognized_dtb_format">Unrecognized DTB format (magic: 0x%1$s)</string>
-    <string name="error_invalid_fdt_totalsize">Invalid FDT totalsize (%1$d) at offset %2$d</string>
-    <string name="error_invalid_fdt_magic">Invalid FDT magic at offset %1$d: 0x%2$s</string>
-    <string name="error_no_valid_fdt_blob">No valid FDT blob found</string>
-    <string name="error_duplicate_slot_selection">Slots (%1$s) selected by more than one cluster</string>
-    <string name="error_failed_determining_slot_domain">Failed to determine slot domain</string>
-    <string name="error_only_topology_changes_detected">Only topology changes detected</string>
     <string name="cpu_topology_title">CPU Topology</string>
     <string name="cpu_controller_label">Cpufreq controller: %1$s (%2$d slots CSRAM)</string>
     <string name="quick_presets">Topology Presets</string>
     <string name="core_to_cluster_assignment">CPU Cluster Mapping</string>
-    <string name="add_cluster">+ Cluster</string>
-    <string name="delete_cluster">- Delete C%1$d</string>
+    <string name="capacity_info">Capacity represents the performance rating of the core.</string>
+    <string name="auto_calculate_capacities">Auto-Calculate</string>
     <string name="cluster_slot_selector_label">Performance Controller Slots</string>
+    <string name="slot_freq_info_title">Frequency Ranges (CSRAM Slots):</string>
+    <string name="slot_freq_info">• 0x11bc10 : 500 – 2000 MHz\n• 0x11bd30 : 725 – 2200 MHz\n• 0x11be50 : 450 – 1540 MHz</string>
     <string name="cluster_index_label">Cluster %1$d:</string>
     <string name="automatic_slot">Automatic (%1$s)</string>
     <string name="automatic">Automatic</string>
@@ -44,5 +20,4 @@
     <string name="editor_info">%1$d parts (%2$d lines)</string>
     <string name="import_vb">Import Vendor Boot Image</string>
     <string name="import_dtb">Import Device Tree Blob</string>
-    <string name="capacity_info">Capacity represents the performance rating of the core.</string>
 </resources>

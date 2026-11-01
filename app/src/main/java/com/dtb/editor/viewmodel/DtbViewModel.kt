@@ -296,7 +296,11 @@ class DtbViewModel(
         }
     }
 
-    fun applyCustomPlan(clusterConfigs: List<ClusterConfig>, syncCpufreq: Boolean) {
+    fun applyCustomPlan(
+        clusterConfigs: List<ClusterConfig>,
+        syncCpufreq: Boolean,
+        customCapacities: Map<Int, Long> = emptyMap()
+    ) {
         val current = _openFileState.value ?: return
         viewModelScope.launch {
             _isProcessing.value = true
@@ -305,7 +309,7 @@ class DtbViewModel(
                     val fullText = DtsChunker.join(current.chunks)
                     val beforeAst = DtsParser().parse(fullText).rootNode
                     val parsed = DtsParser().parse(fullText)
-                    val (success, msg) = topologyManager.applyCustomPlan(parsed.rootNode, clusterConfigs, syncCpufreq)
+                    val (success, msg) = topologyManager.applyCustomPlan(parsed.rootNode, clusterConfigs, syncCpufreq, customCapacities)
                     if (!success) {
                         _snackbarMessage.emit("Failed to apply topology: $msg")
                         return@withContext

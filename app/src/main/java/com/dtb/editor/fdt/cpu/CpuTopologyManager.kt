@@ -196,7 +196,8 @@ class CpuTopologyManager(
     fun applyCustomPlan(
         rootNode: FdtNode,
         clusterConfigs: List<ClusterConfig>,
-        syncCpufreq: Boolean = true
+        syncCpufreq: Boolean = true,
+        customCapacities: Map<Int, Long> = emptyMap()
     ): Pair<Boolean, String> {
         val cores = engine.extractCpuCores(rootNode)
         if (cores.isEmpty()) return Pair(false, "No CPU cores found in /cpus node")
@@ -212,7 +213,7 @@ class CpuTopologyManager(
 
         val slots = if (controllerInfo != null) engine.assignDomainSlots(plan.clusters, cores, controllerInfo) else emptyMap()
 
-        return engine.applyPlanToAst(rootNode, planWithWarnings, cores, controllerInfo, slots)
+        return engine.applyPlanToAst(rootNode, planWithWarnings, cores, controllerInfo, slots, customCapacities)
     }
 
     fun previewPlan(

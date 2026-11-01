@@ -467,7 +467,8 @@ class TopologyEngine {
         plan: TopologyPlan,
         cpuCores: List<CpuCoreDetail>,
         controllerInfo: PerformanceControllerInfo?,
-        assignedSlots: Map<Int, Long>
+        assignedSlots: Map<Int, Long>,
+        customCapacities: Map<Int, Long> = emptyMap()
     ): Pair<Boolean, String> {
         if (!plan.isValid) {
             return Pair(false, "Cannot apply invalid topology plan: ${plan.errors.joinToString("; ")}")
@@ -609,6 +610,21 @@ class TopologyEngine {
             }
         }
 
+        // 4. Synchronize CPU capacity-dmips-mhz if provided
+        for ((cpuIdx, capVal) in customCapacities) {
+            val targetCpuNode = cpuNodes.getOrNull(cpuIdx) ?: continue
+            val capBuf = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN)
+            capBuf.putInt(capVal.toInt())
+            val capProp = FdtProperty("capacity-dmips-mhz", capBuf.array())
+            val existingCapIdx = targetCpuNode.properties.indexOfFirst { it.name == "capacity-dmips-mhz" }
+            if (existingCapIdx != -1) {
+                targetCpuNode.properties[existingCapIdx] = capProp
+            } else {
+                targetCpuNode.properties.add(capProp)
+            }
+            logs.add("Updated ${targetCpuNode.name} capacity-dmips-mhz to $capVal")
+        }
+
         val report = buildString {
             appendLine("Topology Plan Applied Successfully (${plan.clusters.map { it.cpuIndices.size }.joinToString("+")}):")
             logs.forEach { appendLine("- $it") }
@@ -739,8 +755,11 @@ class TopologyEngine {
             if (path == "/cpus/cpu-map" || path.startsWith("/cpus/cpu-map/") || path.contains("/cpus/cpu-map")) {
                 return true
             }
-            // 2. performance-domains or phandle on a cpu node
+            // 2. performance-domains, capacity-dmips-mhz, or phandle on a cpu node
             if (path.matches(Regex(""".*/cpu(@[^/]+)?/performance-domains"""))) {
+                return true
+            }
+            if (path.matches(Regex(""".*/cpu(@[^/]+)?/capacity-dmips-mhz"""))) {
                 return true
             }
             if (path.matches(Regex(""".*/cpu(@[^/]+)?/phandle"""))) {
