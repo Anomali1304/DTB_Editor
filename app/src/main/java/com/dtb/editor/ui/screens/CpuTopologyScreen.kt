@@ -6,6 +6,8 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -272,7 +274,9 @@ private fun CoreRowItem(core: CpuCoreDetail, capacity: Long, onCapacityChange: (
 
 @Composable
 private fun RepeatingButton(imageVector: androidx.compose.ui.graphics.vector.ImageVector, contentDescription: String, enabled: Boolean, onClick: () -> Unit) {
-    var isPressed by remember { mutableStateOf(false) }
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+
     LaunchedEffect(isPressed, enabled) {
         if (isPressed && enabled) {
             onClick()
@@ -280,18 +284,14 @@ private fun RepeatingButton(imageVector: androidx.compose.ui.graphics.vector.Ima
             while (isPressed && enabled) { onClick(); delay(70L) }
         }
     }
+
     Box(
-        modifier = Modifier.size(32.dp).clip(RoundedCornerShape(6.dp)).pointerInput(enabled) {
-            detectTapGestures(
-                onPress = {
-                    if (enabled) {
-                        isPressed = true
-                        tryAwaitRelease()
-                        isPressed = false
-                    }
-                }
-            )
-        },
+        modifier = Modifier.size(32.dp).clip(RoundedCornerShape(6.dp)).clickable(
+            enabled = enabled,
+            interactionSource = interactionSource,
+            indication = null, // Disable default ripple to avoid deprecation and conflicts
+            onClick = onClick
+        ),
         contentAlignment = Alignment.Center
     ) {
         Icon(imageVector, contentDescription, modifier = Modifier.size(18.dp), tint = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
