@@ -1,0 +1,23 @@
+<resources>
+    <string name="app_name">DTB Editor</string>
+    <string name="no_cpu_nodes_detected">No CPU nodes detected in this Device Tree.</string>
+    <string name="cpu_topology_title">CPU Topology</string>
+    <string name="cpu_controller_label">Cpufreq controller: %1$s (%2$d slots CSRAM)</string>
+    <string name="quick_presets">Topology Presets</string>
+    <string name="core_to_cluster_assignment">CPU Cluster Mapping</string>
+    <string name="capacity_info">Capacity represents the performance rating of the core.</string>
+    <string name="auto_calculate_capacities">Auto-Calculate</string>
+    <string name="cluster_slot_selector_label">Performance Controller Slots</string>
+    <string name="slot_freq_info_title">Frequency Ranges (CSRAM Slots):</string>
+    <string name="slot_freq_info">• 0x11bc10 : 500 – 2000 MHz\n• 0x11bd30 : 725 – 2200 MHz\n• 0x11be50 : 450 – 1540 MHz</string>
+    <string name="cluster_index_label">Cluster %1$d:</string>
+    <string name="automatic_slot">Automatic (%1$s)</string>
+    <string name="automatic">Automatic</string>
+    <string name="preview_topology_title">Topology Preview</string>
+    <string name="empty_cluster_label">(empty)</string>
+    <string name="apply_to_dts">Apply Topology</string>
+    <string name="apply_fix_errors">Resolve Conflicts</string>
+    <string name="editor_info">%1$d parts (%2$d lines)</string>
+    <string name="import_vb">Import Vendor Boot Image</string>
+    <string name="import_dtb">Import Device Tree Blob</string>
+</resources>
