@@ -350,7 +350,7 @@ class CpuTopologyPreviewTest {
             } else configs
 
             val preview = engine.previewPlan(finalConfigs, cores, controller, syncCpufreq = true)
-            assertTrue("Preset $preset preview failed: ${preview.errors}. Warnings: ${preview.warnings}", preview.isValid)
+            assertTrue("Preset $preset preview must be valid", preview.isValid)
             
             val (success, report) = engine.applyPlanToAst(root, preview.plan, cores, controller, preview.assignedSlots)
             assertTrue("Preset $preset apply failed: $report", success)
