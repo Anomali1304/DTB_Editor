@@ -138,6 +138,7 @@ fun VendorBootFlasherScreen(
                     }
 
                     selectedImage = info
+                    flashSuccess = null
                     stepLogs.add("Selected: ${info.name} (${formatFileSize(info.sizeBytes)})")
                     if (info.isStandardVendorBoot) {
                         stepLogs.add("Header verified: Android vendor_boot format")
@@ -764,35 +765,16 @@ fun VendorBootFlasherScreen(
                     label = "actionButtonsAnim"
                 ) { successState ->
                     if (successState == true) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        Button(
+                            onClick = { showConfirmRebootDialog = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp)
                         ) {
-                            OutlinedButton(
-                                onClick = {
-                                    flashSuccess = null
-                                    selectedImage = null
-                                },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(50.dp)
-                            ) {
-                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Flash Another")
-                            }
-
-                            Button(
-                                onClick = { showConfirmRebootDialog = true },
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                                modifier = Modifier
-                                    .weight(1.2f)
-                                    .height(50.dp)
-                            ) {
-                                Icon(Icons.Default.RestartAlt, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Reboot Device", style = MaterialTheme.typography.titleMedium)
-                            }
+                            Icon(Icons.Default.RestartAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Reboot Device", style = MaterialTheme.typography.titleMedium)
                         }
                     } else {
                         Button(
