@@ -354,8 +354,8 @@ class DtsParserDigitPropertyTest {
         val c2 = cpuMap.findChild("cluster2")!!
         assertEquals(2, c2.children.size)
 
-        // Verify performance-domains on all 8 CPUs: [0, 0, 0, 0, 1, 1, 2, 2]
-        val expectedDomains = listOf(0, 0, 0, 0, 1, 1, 2, 2)
+        // Verify performance-domains on all 8 CPUs: cluster0(0x11bc10->0), cluster1(0x11be50->2), cluster2(0x11bd30->1)
+        val expectedDomains = listOf(0, 0, 0, 0, 2, 2, 1, 1)
         val cpuNodes = listOf("cpu@0", "cpu@100", "cpu@200", "cpu@300", "cpu@400", "cpu@500", "cpu@600", "cpu@700")
             .map { cpus.findChild(it)!! }
 

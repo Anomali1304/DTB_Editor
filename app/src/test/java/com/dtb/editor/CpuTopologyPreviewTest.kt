@@ -184,18 +184,18 @@ class CpuTopologyPreviewTest {
         assertEquals(3, cpuMapNode.children[1].children.size)
         assertEquals(3, cpuMapNode.children[2].children.size)
 
-        // Verify performance-domains per CPU [0,0,1,1,1,2,2,2]
+        // Verify performance-domains per CPU: cluster0(slot 0x11bc10->0), cluster1(slot 0x11be50->2), cluster2(slot 0x11bd30->1)
         val updatedCores = engine.extractCpuCores(reparsedRoot)
         val domains = updatedCores.map { it.originalPerfDomainIndex }
-        assertEquals(listOf(0, 0, 1, 1, 1, 2, 2, 2), domains)
+        assertEquals(listOf(0, 0, 2, 2, 2, 1, 1, 1), domains)
 
-        // Verify reg controller = 0x11bc10, 0x11be50, 0x11bd30
+        // Verify reg controller = 0x11bc10 (domain 0), 0x11bd30 (domain 1), 0x11be50 (domain 2)
         val perfController = reparsedRoot.findNodeByPath("/soc/performance-controller@11bc00")!!
         val regVal = perfController.findProperty("reg")!!.asU32List()
         assertEquals(12, regVal.size)
         assertEquals(0x11bc10L, regVal[1]) // domain 0
-        assertEquals(0x11be50L, regVal[5]) // domain 1
-        assertEquals(0x11bd30L, regVal[9]) // domain 2
+        assertEquals(0x11bd30L, regVal[5]) // domain 1
+        assertEquals(0x11be50L, regVal[9]) // domain 2
     }
 
     @Test
@@ -311,7 +311,7 @@ class CpuTopologyPreviewTest {
         val (success, report) = engine.applyPlanToAst(root, preview.plan, cores, controller, preview.assignedSlots)
         assertTrue("Applying mono-cluster big domain must succeed", success)
         assertTrue(report.contains("Reconstructed /cpus/cpu-map with 1 clusters"))
-        assertTrue(report.contains("Synchronized cpufreq performance-controller reg/reg-names for 1 domains"))
+        assertTrue(report.contains("Synchronized cpufreq performance-controller reg/reg-names"))
     }
 
     @Test

@@ -169,12 +169,12 @@ class CpuTopologyEngineTest {
         assertEquals(3, cpuMap.children[1].children.size) // core0, core1, core2
         assertEquals(3, cpuMap.children[2].children.size) // core0, core1, core2
 
-        // Verify performance-domains per cpu: [0,0,1,1,1,2,2,2]
+        // Verify performance-domains per cpu: cluster0(slot 0x11bc10->0), cluster1(slot 0x11be50->2), cluster2(slot 0x11bd30->1)
         val updatedCores = engine.extractCpuCores(root)
         val domainPerCpu = updatedCores.map { it.originalPerfDomainIndex }
-        assertEquals(listOf(0, 0, 1, 1, 1, 2, 2, 2), domainPerCpu)
+        assertEquals(listOf(0, 0, 2, 2, 2, 1, 1, 1), domainPerCpu)
 
-        // Verify performance-controller reg and reg-names
+        // Verify performance-controller reg and reg-names preserves all 3 available slots
         val perfController = root.findNodeByPath("/soc/performance-controller@11bc00")!!
         val regVal = perfController.findProperty("reg")!!.asU32List()
         assertEquals(12, regVal.size) // 3 entries * 4 cells = 12 cells
@@ -184,12 +184,12 @@ class CpuTopologyEngineTest {
         assertEquals(0x120L, regVal[3])
 
         assertEquals(0L, regVal[4])
-        assertEquals(0x11be50L, regVal[5]) // domain 1 = 0x11be50
+        assertEquals(0x11bd30L, regVal[5]) // domain 1 = 0x11bd30
         assertEquals(0L, regVal[6])
         assertEquals(0x120L, regVal[7])
 
         assertEquals(0L, regVal[8])
-        assertEquals(0x11bd30L, regVal[9]) // domain 2 = 0x11bd30
+        assertEquals(0x11be50L, regVal[9]) // domain 2 = 0x11be50
         assertEquals(0L, regVal[10])
         assertEquals(0x120L, regVal[11])
 
@@ -220,12 +220,13 @@ class CpuTopologyEngineTest {
         val (success, log) = engine.applyPlanToAst(root, plan62, cores233, controller233, slots62)
         assertTrue(success)
 
-        // Verify exact restored reg and slots
+        // Verify exact restored reg and slots (preserves 3 fixed available slots)
         val perfController = root.findNodeByPath("/soc/performance-controller@11bc00")!!
         val regVal = perfController.findProperty("reg")!!.asU32List()
-        assertEquals(8, regVal.size) // 2 entries * 4 cells
+        assertEquals(12, regVal.size) // 3 entries * 4 cells (all available hardware domain slots preserved)
         assertEquals(0x11bc10L, regVal[1])
         assertEquals(0x11bd30L, regVal[5])
+        assertEquals(0x11be50L, regVal[9])
         assertEquals(0x11bc10L, slots62[0])
         assertEquals(0x11bd30L, slots62[1])
     }

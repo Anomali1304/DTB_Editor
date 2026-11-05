@@ -140,6 +140,33 @@ fun CpuTopologyScreen(
                     if (top.controllerInfo != null) {
                         Text("Controller: ${top.controllerInfo.nodeName} • 3 Performance Domains", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                    if (top.syncCpufreqSupported) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "Sync Cpufreq Hardware Domains",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    if (syncCpufreq) "Modifies performance-controller reg (Requires custom kernel)" else "Cpu-Map Only Mode (Safe for Stock Kernel Boot)",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (syncCpufreq) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Switch(
+                                checked = syncCpufreq,
+                                onCheckedChange = { syncCpufreq = it }
+                            )
+                        }
+                    }
                 }
             }
         }

@@ -582,23 +582,15 @@ class TopologyEngine {
         // 3. Synchronize performance domains if enabled and controller detected
         if (plan.syncCpufreq && controllerInfo != null) {
             val slotSize = controllerInfo.existingSlots.firstOrNull()?.second ?: 0x120L
-            val activeSlots = mutableListOf<Pair<Long, Long>>()
-            val slotToDomainIdx = mutableMapOf<Long, Int>()
+            val availableSlots = controllerInfo.availableSlots
+            val slotToDomainIdx = availableSlots.mapIndexed { idx, slot -> slot to idx }.toMap()
 
             for (clusterConfig in plan.clusters) {
                 val slotAddr = assignedSlots[clusterConfig.clusterIndex]
                     ?: return Pair(false, "Missing domain slot assignment for cluster ${clusterConfig.clusterIndex}")
 
-                if (!slotToDomainIdx.containsKey(slotAddr)) {
-                    val nextDomainIdx = slotToDomainIdx.size
-                    slotToDomainIdx[slotAddr] = nextDomainIdx
-                    activeSlots.add(Pair(slotAddr, slotSize))
-                }
-            }
-
-            for (clusterConfig in plan.clusters) {
-                val slotAddr = assignedSlots[clusterConfig.clusterIndex]!!
-                val domainIdx = slotToDomainIdx[slotAddr]!!
+                val domainIdx = slotToDomainIdx[slotAddr]
+                    ?: return Pair(false, "Assigned domain slot 0x${slotAddr.toString(16)} is not in available performance controller slots")
 
                 for (cpuIdx in clusterConfig.cpuIndices) {
                     val targetCpuNode = cpuNodes.getOrNull(cpuIdx) ?: continue
@@ -616,20 +608,15 @@ class TopologyEngine {
                 }
             }
 
-            // Verify no duplicate slots in activeSlots
-            if (activeSlots.map { it.first }.toSet().size != activeSlots.size) {
-                return Pair(false, "Duplicate slots detected in performance-controller reg: ${activeSlots.map { "0x" + it.first.toString(16) }}")
-            }
-
-            // Rewrite controller reg property
+            // Rewrite controller reg property for all available slots in fixed order
             val addrCells = controllerInfo.addressCells
             val sizeCells = controllerInfo.sizeCells
             val regCellWidth = addrCells + sizeCells
-            val regBuffer = ByteBuffer.allocate(activeSlots.size * regCellWidth * 4).order(ByteOrder.BIG_ENDIAN)
+            val regBuffer = ByteBuffer.allocate(availableSlots.size * regCellWidth * 4).order(ByteOrder.BIG_ENDIAN)
 
-            for ((slotAddr, sSize) in activeSlots) {
+            for (slotAddr in availableSlots) {
                 writeCellsValue(regBuffer, slotAddr, addrCells)
-                writeCellsValue(regBuffer, sSize, sizeCells)
+                writeCellsValue(regBuffer, slotSize, sizeCells)
             }
 
             val controllerNode = rootNode.findNodeByPath(controllerInfo.fullPath) ?: controllerInfo.astNode
@@ -641,9 +628,9 @@ class TopologyEngine {
                 controllerNode.properties.add(newRegProp)
             }
 
-            // Rewrite reg-names property with null terminators
+            // Rewrite reg-names property for all available slots with null terminators
             val regNamesStream = java.io.ByteArrayOutputStream()
-            for (i in activeSlots.indices) {
+            for (i in availableSlots.indices) {
                 val strName = "performance-domain$i"
                 regNamesStream.write(strName.toByteArray(Charsets.US_ASCII))
                 regNamesStream.write(0) // null terminator
@@ -657,7 +644,7 @@ class TopologyEngine {
                 controllerNode.properties.add(newRegNamesProp)
             }
 
-            logs.add("Synchronized cpufreq performance-controller reg/reg-names for ${activeSlots.size} domains:")
+            logs.add("Synchronized cpufreq performance-controller reg/reg-names for ${availableSlots.size} domains:")
             for ((cIdx, slotAddr) in assignedSlots) {
                 val dIdx = slotToDomainIdx[slotAddr] ?: cIdx
                 logs.add("  - Cluster $cIdx -> domain$dIdx at CSRAM slot 0x${slotAddr.toString(16)}")
