@@ -313,4 +313,47 @@ class CpuTopologyPreviewTest {
         assertTrue(report.contains("Reconstructed /cpus/cpu-map with 1 clusters"))
         assertTrue(report.contains("Synchronized cpufreq performance-controller reg/reg-names for 1 domains"))
     }
+
+    @Test
+    fun testNewRequestedPresets() {
+        val root = dtsParser.parse(STOCK_MT6789_DTS).rootNode
+        val cores = engine.extractCpuCores(root)
+        val controller = engine.discoverPerformanceController(root, cores)!!
+
+        val requestedPresets = listOf(
+            listOf(4, 1, 1, 2),
+            listOf(4, 2, 1, 1),
+            listOf(2, 3, 3),
+            listOf(1, 3, 4),
+            listOf(1, 5, 2),
+            listOf(4, 3),
+            listOf(5, 1, 1, 1)
+        )
+
+        for (preset in requestedPresets) {
+            val configs = mutableListOf<ClusterConfig>()
+            var currentCpu = 0
+            for ((cIdx, size) in preset.withIndex()) {
+                val cpus = (currentCpu until (currentCpu + size)).filter { it < 8 }
+                configs.add(ClusterConfig(cIdx, cpus))
+                currentCpu += size
+            }
+
+            val finalConfigs = if (preset.size > 3) {
+                configs.mapIndexed { idx, config ->
+                    when (idx) {
+                        0 -> config.copy(selectedDomainSlot = 0x11bc10L)
+                        1 -> config.copy(selectedDomainSlot = 0x11be50L)
+                        else -> config.copy(selectedDomainSlot = 0x11bd30L)
+                    }
+                }
+            } else configs
+
+            val preview = engine.previewPlan(finalConfigs, cores, controller, syncCpufreq = true)
+            assertTrue("Preset $preset preview failed: ${preview.errors}. Warnings: ${preview.warnings}", preview.isValid)
+            
+            val (success, report) = engine.applyPlanToAst(root, preview.plan, cores, controller, preview.assignedSlots)
+            assertTrue("Preset $preset apply failed: $report", success)
+        }
+    }
 }

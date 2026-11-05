@@ -159,6 +159,10 @@ class TopologyEngine {
         }
 
         warnings.addAll(generateWarnings(plan.clusters, cpuCores, controllerInfo))
+        if (controllerInfo != null) {
+            warnings.add("DEBUG: availableSlots = ${controllerInfo.availableSlots.map { "0x" + it.toString(16) }}")
+            warnings.addAll(controllerInfo.diagnostics)
+        }
 
         val summary = buildString {
             append("Topology: ${plan.clusters.size} clusters (${plan.clusters.map { it.cpuIndices.size }.joinToString("+")})")
@@ -348,6 +352,9 @@ class TopologyEngine {
                     offset += cpuhvfsCellWidth
                 }
             }
+            diagnostics.add("DEBUG: maxDomainsAllowed=$maxDomainsAllowed, tblCount=${tblOffProp?.asU32List()?.size}, pllCount=${pllConProp?.asU32List()?.size}, clkCount=${clkDivProp?.asU32List()?.size}")
+            diagnostics.add("DEBUG: csramBase=0x${csramBase?.toString(16)}, csramSize=0x${csramSize?.toString(16)}, csramEnd=0x${(csramBase?.let { it + (csramSize ?: 0L) })?.toString(16)}")
+            diagnostics.add("DEBUG: stride=0x${stride.toString(16)}, slotSize=0x${slotSize.toString(16)}, firstSlotAddr=0x${firstSlotAddr.toString(16)}")
         }
 
         // Extrapolate available slots or limit to existing
@@ -379,6 +386,8 @@ class TopologyEngine {
             }
             core.copy(originalSlotAddress = slot)
         }
+
+
 
         return PerformanceControllerInfo(
             phandle = firstPerfPhandle,

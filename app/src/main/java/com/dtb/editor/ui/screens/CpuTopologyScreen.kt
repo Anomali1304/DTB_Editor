@@ -164,6 +164,13 @@ fun CpuTopologyScreen(
                             listOf(2, 4, 2) -> "2+4+2 (Tri-Cluster Efficiency)"
                             listOf(2, 2, 2, 2) -> "2+2+2+2 (Quad-Cluster Shared Policy)"
                             listOf(8) -> "8 (Mono-Cluster Big)"
+                            listOf(4, 1, 1, 2) -> "4+1+1+2 (Quad-Cluster Shared Policy)"
+                            listOf(4, 2, 1, 1) -> "4+2+1+1 (Quad-Cluster Shared Policy)"
+                            listOf(2, 3, 3) -> "2+3+3 (Tri-Cluster)"
+                            listOf(1, 3, 4) -> "1+3+4 (Tri-Cluster)"
+                            listOf(1, 5, 2) -> "1+5+2 (Tri-Cluster)"
+                            listOf(4, 3) -> "4+3 (Dual-Cluster Partial)"
+                            listOf(5, 1, 1, 1) -> "5+1+1+1 (Quad-Cluster Shared Policy)"
                             else -> preset.joinToString("+")
                         }
                         FilterChip(
@@ -356,7 +363,14 @@ private fun getApplicablePresets(totalCores: Int): List<List<Int>> {
             listOf(3, 3, 2),
             listOf(2, 4, 2),
             listOf(2, 2, 2, 2),
-            listOf(8)
+            listOf(8),
+            listOf(4, 1, 1, 2),
+            listOf(4, 2, 1, 1),
+            listOf(2, 3, 3),
+            listOf(1, 3, 4),
+            listOf(1, 5, 2),
+            listOf(4, 3),
+            listOf(5, 1, 1, 1)
         )
         6 -> listOf(listOf(4, 2), listOf(2, 2, 2), listOf(3, 3))
         4 -> listOf(listOf(2, 2), listOf(4), listOf(1, 1, 1, 1))
@@ -376,6 +390,30 @@ private fun createConfigsFromSizes(sizes: List<Int>, totalCores: Int): List<Clus
             ClusterConfig(1, listOf(2, 3), selectedDomainSlot = 0x11be50L),
             ClusterConfig(2, listOf(4, 5), selectedDomainSlot = 0x11bd30L),
             ClusterConfig(3, listOf(6, 7), selectedDomainSlot = 0x11bd30L)
+        )
+    }
+    if (sizes == listOf(4, 1, 1, 2) && totalCores == 8) {
+        return listOf(
+            ClusterConfig(0, listOf(0, 1, 2, 3), selectedDomainSlot = 0x11bc10L),
+            ClusterConfig(1, listOf(4), selectedDomainSlot = 0x11be50L),
+            ClusterConfig(2, listOf(5), selectedDomainSlot = 0x11bd30L),
+            ClusterConfig(3, listOf(6, 7), selectedDomainSlot = 0x11bd30L)
+        )
+    }
+    if (sizes == listOf(4, 2, 1, 1) && totalCores == 8) {
+        return listOf(
+            ClusterConfig(0, listOf(0, 1, 2, 3), selectedDomainSlot = 0x11bc10L),
+            ClusterConfig(1, listOf(4, 5), selectedDomainSlot = 0x11be50L),
+            ClusterConfig(2, listOf(6), selectedDomainSlot = 0x11bd30L),
+            ClusterConfig(3, listOf(7), selectedDomainSlot = 0x11bd30L)
+        )
+    }
+    if (sizes == listOf(5, 1, 1, 1) && totalCores == 8) {
+        return listOf(
+            ClusterConfig(0, listOf(0, 1, 2, 3, 4), selectedDomainSlot = 0x11bc10L),
+            ClusterConfig(1, listOf(5), selectedDomainSlot = 0x11be50L),
+            ClusterConfig(2, listOf(6), selectedDomainSlot = 0x11bd30L),
+            ClusterConfig(3, listOf(7), selectedDomainSlot = 0x11bd30L)
         )
     }
     val configs = mutableListOf<ClusterConfig>()
