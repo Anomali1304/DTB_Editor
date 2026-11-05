@@ -158,15 +158,29 @@ class RootFlashManager {
 
     suspend fun rebootDevice(): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "reboot"))
+            // Graceful Android framework reboot:
+            // 1. "svc power reboot" calls Android PowerManagerService ShutdownThread, showing standard restart animation
+            // 2. "cmd power reboot" (Android 10+ command line service call)
+            // 3. "setprop sys.powerctl reboot" (init-level graceful property trigger)
+            val gracefulScript = """
+                if which svc >/dev/null 2>&1; then
+                    svc power reboot || cmd power reboot || setprop sys.powerctl reboot
+                elif which cmd >/dev/null 2>&1; then
+                    cmd power reboot || setprop sys.powerctl reboot
+                else
+                    setprop sys.powerctl reboot || reboot
+                fi
+            """.trimIndent()
+
+            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", gracefulScript))
             val exitCode = process.waitFor()
             if (exitCode == 0) {
                 Result.success(true)
             } else {
-                val processSvc = Runtime.getRuntime().exec(arrayOf("su", "-c", "svc power reboot"))
-                val exitSvc = processSvc.waitFor()
-                if (exitSvc == 0) Result.success(true)
-                else Result.failure(Exception("Reboot command failed with exit code $exitSvc"))
+                // Secondary fallback
+                val fb = Runtime.getRuntime().exec(arrayOf("su", "-c", "setprop sys.powerctl reboot"))
+                fb.waitFor()
+                Result.success(true)
             }
         } catch (e: Exception) {
             Result.failure(e)
