@@ -77,8 +77,81 @@ class DtbViewModel(
     private val dtcEngine: DtcEngine = DtcEngineImpl(),
     private val topologyManager: CpuTopologyManager = CpuTopologyManager(),
     private val vendorBoot: VendorBoot = VendorBoot(),
-    private val dtbPayloadHelper: DtbPayloadHelper = DtbPayloadHelper()
+    private val dtbPayloadHelper: DtbPayloadHelper = DtbPayloadHelper(),
+    private val rootFlashManager: com.dtb.editor.root.RootFlashManager = com.dtb.editor.root.RootFlashManager()
 ) : ViewModel() {
+
+    suspend fun checkRootAccess(): Boolean {
+        return rootFlashManager.checkRootAccess()
+    }
+
+    suspend fun detectSlotInfo(): com.dtb.editor.root.FlashSlotInfo {
+        return rootFlashManager.detectSlotInfo()
+    }
+
+    suspend fun rebootDevice(): Result<Boolean> {
+        return rootFlashManager.rebootDevice()
+    }
+
+    fun flashToPartitionWithLogs(
+        targetPartition: String,
+        context: Context,
+        onLogLine: (String) -> Unit,
+        onFinished: (Boolean, String) -> Unit
+    ) {
+        val current = _openFileState.value ?: return
+        viewModelScope.launch {
+            _isProcessing.value = true
+            withContext(Dispatchers.IO) {
+                try {
+                    onLogLine("[*] Preparing vendor_boot image payload...")
+                    val bytesToSave = prepareSaveBytes()
+                    if (bytesToSave == null) {
+                        val msg = "Failed to generate image payload"
+                        onLogLine("[-] $msg")
+                        onFinished(false, msg)
+                        return@withContext
+                    }
+
+                    onLogLine("[*] Checking root access...")
+                    val isRooted = rootFlashManager.checkRootAccess()
+                    if (!isRooted) {
+                        val msg = "Root access denied or su binary not found"
+                        onLogLine("[-] $msg")
+                        onFinished(false, msg)
+                        return@withContext
+                    }
+                    onLogLine("[+] Root access granted (uid=0)")
+
+                    val result = rootFlashManager.flashVendorBootImageWithLogs(
+                        context,
+                        bytesToSave,
+                        targetPartition,
+                        onLog = onLogLine
+                    )
+
+                    if (result.isSuccess) {
+                        _openFileState.value = current.copy(isModified = false)
+                        val okMsg = result.getOrNull() ?: "Flash successful"
+                        onFinished(true, okMsg)
+                    } else {
+                        val errMsg = result.exceptionOrNull()?.message ?: "Flash failed"
+                        onFinished(false, errMsg)
+                    }
+                } catch (e: Exception) {
+                    val errMsg = e.message ?: "Flash failed"
+                    onLogLine("[-] Error: $errMsg")
+                    onFinished(false, errMsg)
+                } finally {
+                    _isProcessing.value = false
+                }
+            }
+        }
+    }
+
+    fun flashToPartition(targetPartition: String, context: Context) {
+        flashToPartitionWithLogs(targetPartition, context, {}, { _, _ -> })
+    }
 
     private val _openFileState = MutableStateFlow<OpenFileState?>(null)
     val openFileState: StateFlow<OpenFileState?> = _openFileState.asStateFlow()
