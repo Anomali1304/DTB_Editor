@@ -5,6 +5,7 @@ import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -313,352 +314,439 @@ fun VendorBootFlasherScreen(
             )
         }
     ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+        var screenEntered by remember { mutableStateOf(false) }
+        LaunchedEffect(Unit) {
+            screenEntered = true
+        }
+
+        AnimatedVisibility(
+            visible = screenEntered,
+            enter = fadeIn(
+                animationSpec = tween(durationMillis = 320, easing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1.0f))
+            ) + slideInVertically(
+                animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy),
+                initialOffsetY = { 40 }
+            ) + scaleIn(
+                animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy),
+                initialScale = 0.96f
+            ),
+            exit = fadeOut(animationSpec = tween(200)),
+            modifier = Modifier.fillMaxSize()
         ) {
-            // Header Status Card (Material You)
-            ElevatedCard(
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = when (flashSuccess) {
-                        true -> MaterialTheme.colorScheme.primaryContainer
-                        false -> MaterialTheme.colorScheme.errorContainer
-                        null -> if (isFlashing) MaterialTheme.colorScheme.secondaryContainer
-                                else MaterialTheme.colorScheme.surfaceVariant
-                    }
-                ),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth()
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(
-                            imageVector = when (flashSuccess) {
-                                true -> Icons.Default.CheckCircle
-                                false -> Icons.Default.Error
-                                null -> if (isFlashing) Icons.Default.FlashOn else Icons.Default.Verified
-                            },
-                            contentDescription = null,
-                            tint = when (flashSuccess) {
-                                true -> MaterialTheme.colorScheme.primary
-                                false -> MaterialTheme.colorScheme.error
-                                null -> MaterialTheme.colorScheme.primary
-                            },
-                            modifier = Modifier.size(28.dp)
-                        )
-                        Column {
-                            Text(
-                                text = when (flashSuccess) {
-                                    true -> "Flashing Completed Successfully"
-                                    false -> "Flashing Failed"
-                                    null -> if (isFlashing) "Flashing in Progress..." else "Flasher Ready"
-                                },
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = "Device: MediaTek MT6789 • Active: $activeSlotLabel",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    if (isFlashing) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.5.dp)
-                    }
+                // Header Status Card (Material You)
+                val targetHeaderBg = when (flashSuccess) {
+                    true -> MaterialTheme.colorScheme.primaryContainer
+                    false -> MaterialTheme.colorScheme.errorContainer
+                    null -> if (isFlashing) MaterialTheme.colorScheme.secondaryContainer
+                    else MaterialTheme.colorScheme.surfaceVariant
                 }
-            }
+                val animatedHeaderBg by animateColorAsState(
+                    targetValue = targetHeaderBg,
+                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy),
+                    label = "headerBgAnim"
+                )
 
-            // Image Selection Card (Material You)
-            OutlinedCard(
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ElevatedCard(
+                    colors = CardDefaults.elevatedCardColors(
+                        containerColor = animatedHeaderBg
+                    ),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .animateContentSize(
+                            animationSpec = spring(
+                                stiffness = Spring.StiffnessMediumLow,
+                                dampingRatio = Spring.DampingRatioNoBouncy
+                            )
+                        )
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text(
-                            "Image Source",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        if (selectedImage != null) {
-                            TextButton(
-                                onClick = { filePickerLauncher.launch(arrayOf("*/*")) },
-                                enabled = !isFlashing
-                            ) {
-                                Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Change")
-                            }
-                        }
-                    }
-
-                    if (selectedImage == null) {
-                        FilledTonalButton(
-                            onClick = { filePickerLauncher.launch(arrayOf("*/*")) },
-                            modifier = Modifier.fillMaxWidth().height(52.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            enabled = !isFlashing
-                        ) {
-                            Icon(Icons.Default.FileOpen, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Select vendor_boot.img from Storage")
-                        }
-                        Text(
-                            "Choose an Android vendor_boot image from your device storage to flash.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    } else {
-                        val img = selectedImage!!
-                        Surface(
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
+                        AnimatedContent(
+                            targetState = Triple(flashSuccess, isFlashing, activeSlotLabel),
+                            transitionSpec = {
+                                (fadeIn(animationSpec = tween(220)) + scaleIn(initialScale = 0.96f))
+                                    .togetherWith(fadeOut(animationSpec = tween(180)) + scaleOut(targetScale = 0.98f))
+                            },
+                            modifier = Modifier.weight(1f),
+                            label = "headerStatusAnim"
+                        ) { (success, flashing, slotLabel) ->
                             Row(
-                                modifier = Modifier.padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 Icon(
-                                    Icons.Default.Memory,
+                                    imageVector = when (success) {
+                                        true -> Icons.Default.CheckCircle
+                                        false -> Icons.Default.Error
+                                        null -> if (flashing) Icons.Default.FlashOn else Icons.Default.Verified
+                                    },
                                     contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
+                                    tint = when (success) {
+                                        true -> MaterialTheme.colorScheme.primary
+                                        false -> MaterialTheme.colorScheme.error
+                                        null -> MaterialTheme.colorScheme.primary
+                                    },
                                     modifier = Modifier.size(28.dp)
                                 )
-                                Column(modifier = Modifier.weight(1f)) {
+                                Column {
                                     Text(
-                                        img.name,
-                                        style = MaterialTheme.typography.bodyMedium,
+                                        text = when (success) {
+                                            true -> "Flashing Completed Successfully"
+                                            false -> "Flashing Failed"
+                                            null -> if (flashing) "Flashing in Progress..." else "Flasher Ready"
+                                        },
+                                        style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.Bold
                                     )
                                     Text(
-                                        "${formatFileSize(img.sizeBytes)} • ${if (img.isStandardVendorBoot) "Standard vendor_boot" else "Raw partition image"}",
+                                        text = "Device: MediaTek MT6789 • Active: $slotLabel",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
-                                Icon(
-                                    Icons.Default.CheckCircle,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Target Partition Slot Selection Card
-            OutlinedCard(
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        "Target Partition Slot",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable(enabled = !isFlashing) { selectedTarget = "active" },
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = (selectedTarget == "active"),
-                                onClick = { selectedTarget = "active" },
-                                enabled = !isFlashing
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Column {
-                                Text(
-                                    "Active Slot ($activeDefaultPart)",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    "Recommended - Flash to the currently active boot slot",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
                             }
                         }
 
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable(enabled = !isFlashing) { selectedTarget = "vendor_boot_a" },
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = (selectedTarget == "vendor_boot_a"),
-                                onClick = { selectedTarget = "vendor_boot_a" },
-                                enabled = !isFlashing
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Slot A (vendor_boot_a)", style = MaterialTheme.typography.bodyMedium)
-                        }
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable(enabled = !isFlashing) { selectedTarget = "vendor_boot_b" },
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = (selectedTarget == "vendor_boot_b"),
-                                onClick = { selectedTarget = "vendor_boot_b" },
-                                enabled = !isFlashing
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Slot B (vendor_boot_b)", style = MaterialTheme.typography.bodyMedium)
-                        }
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable(enabled = !isFlashing) { selectedTarget = "both" },
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = (selectedTarget == "both"),
-                                onClick = { selectedTarget = "both" },
-                                enabled = !isFlashing
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Both Slots (vendor_boot_a & vendor_boot_b)", style = MaterialTheme.typography.bodyMedium)
+                        if (isFlashing) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.5.dp)
                         }
                     }
                 }
-            }
 
-            // Operation Steps & Progress (Material You Card)
-            ElevatedCard(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-            ) {
-                Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                // Image Selection Card (Material You)
+                OutlinedCard(
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .animateContentSize(
+                            animationSpec = spring(
+                                stiffness = Spring.StiffnessMediumLow,
+                                dampingRatio = Spring.DampingRatioNoBouncy
+                            )
+                        )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Image Source",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            if (selectedImage != null) {
+                                TextButton(
+                                    onClick = { filePickerLauncher.launch(arrayOf("*/*")) },
+                                    enabled = !isFlashing
+                                ) {
+                                    Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Change")
+                                }
+                            }
+                        }
+
+                        AnimatedContent(
+                            targetState = selectedImage,
+                            transitionSpec = {
+                                (fadeIn(tween(220)) + scaleIn(initialScale = 0.97f))
+                                    .togetherWith(fadeOut(tween(160)) + scaleOut(targetScale = 0.98f))
+                            },
+                            label = "imageSourceAnim"
+                        ) { imageInfo ->
+                            if (imageInfo == null) {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    FilledTonalButton(
+                                        onClick = { filePickerLauncher.launch(arrayOf("*/*")) },
+                                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                                        shape = RoundedCornerShape(12.dp),
+                                        enabled = !isFlashing
+                                    ) {
+                                        Icon(Icons.Default.FileOpen, contentDescription = null)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Select vendor_boot.img from Storage")
+                                    }
+                                    Text(
+                                        "Choose an Android vendor_boot image from your device storage to flash.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            } else {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Memory,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                imageInfo.name,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Text(
+                                                "${formatFileSize(imageInfo.sizeBytes)} • ${if (imageInfo.isStandardVendorBoot) "Standard vendor_boot" else "Raw partition image"}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        Icon(
+                                            Icons.Default.CheckCircle,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Target Partition Slot Selection Card
+                OutlinedCard(
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .animateContentSize(
+                            animationSpec = spring(
+                                stiffness = Spring.StiffnessMediumLow,
+                                dampingRatio = Spring.DampingRatioNoBouncy
+                            )
+                        )
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
-                            "Operation Steps",
+                            "Target Partition Slot",
                             style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
                         )
-                        Text(
-                            "${stepLogs.size} events",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
 
-                    if (isFlashing) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    LazyColumn(
-                        state = logListState,
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        items(stepLogs) { line ->
-                            val isSuccess = line.startsWith("[+]") || line.contains("success", ignoreCase = true)
-                            val isError = line.startsWith("[-]") || line.contains("failed", ignoreCase = true) || line.contains("error", ignoreCase = true)
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable(enabled = !isFlashing) { selectedTarget = "active" },
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = (selectedTarget == "active"),
+                                    onClick = { selectedTarget = "active" },
+                                    enabled = !isFlashing
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        "Active Slot ($activeDefaultPart)",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        "Recommended - Flash to the currently active boot slot",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
 
                             Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable(enabled = !isFlashing) { selectedTarget = "vendor_boot_a" },
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = when {
-                                        isSuccess -> Icons.Default.CheckCircle
-                                        isError -> Icons.Default.Cancel
-                                        else -> Icons.Default.Info
-                                    },
-                                    contentDescription = null,
-                                    tint = when {
-                                        isSuccess -> Color(0xFF2E7D32)
-                                        isError -> MaterialTheme.colorScheme.error
-                                        else -> MaterialTheme.colorScheme.primary
-                                    },
-                                    modifier = Modifier.size(16.dp)
+                                RadioButton(
+                                    selected = (selectedTarget == "vendor_boot_a"),
+                                    onClick = { selectedTarget = "vendor_boot_a" },
+                                    enabled = !isFlashing
                                 )
-                                Text(
-                                    text = line.removePrefix("[+]").removePrefix("[-]").removePrefix("[*]").trim(),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = when {
-                                        isError -> MaterialTheme.colorScheme.error
-                                        else -> MaterialTheme.colorScheme.onSurface
-                                    }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Slot A (vendor_boot_a)", style = MaterialTheme.typography.bodyMedium)
+                            }
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable(enabled = !isFlashing) { selectedTarget = "vendor_boot_b" },
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = (selectedTarget == "vendor_boot_b"),
+                                    onClick = { selectedTarget = "vendor_boot_b" },
+                                    enabled = !isFlashing
                                 )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Slot B (vendor_boot_b)", style = MaterialTheme.typography.bodyMedium)
+                            }
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable(enabled = !isFlashing) { selectedTarget = "both" },
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = (selectedTarget == "both"),
+                                    onClick = { selectedTarget = "both" },
+                                    enabled = !isFlashing
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Both Slots (vendor_boot_a & vendor_boot_b)", style = MaterialTheme.typography.bodyMedium)
                             }
                         }
                     }
                 }
-            }
 
-            // Action Buttons
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Button(
-                    onClick = { showConfirmFlashDialog = true },
-                    enabled = isPermissionGranted && selectedImage != null && !isFlashing,
-                    modifier = Modifier.weight(1f).height(50.dp)
+                // Operation Steps & Progress (Material You Card)
+                ElevatedCard(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.elevatedCardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .animateContentSize(
+                            animationSpec = spring(
+                                stiffness = Spring.StiffnessMediumLow,
+                                dampingRatio = Spring.DampingRatioNoBouncy
+                            )
+                        )
                 ) {
-                    Icon(Icons.Default.FlashOn, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Flash Image", style = MaterialTheme.typography.titleMedium)
+                    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Operation Steps",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                "${stepLogs.size} events",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        if (isFlashing) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        LazyColumn(
+                            state = logListState,
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            items(stepLogs) { line ->
+                                val isSuccess = line.startsWith("[+]") || line.contains("success", ignoreCase = true)
+                                val isError = line.startsWith("[-]") || line.contains("failed", ignoreCase = true) || line.contains("error", ignoreCase = true)
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .animateItem()
+                                ) {
+                                    Icon(
+                                        imageVector = when {
+                                            isSuccess -> Icons.Default.CheckCircle
+                                            isError -> Icons.Default.Cancel
+                                            else -> Icons.Default.Info
+                                        },
+                                        contentDescription = null,
+                                        tint = when {
+                                            isSuccess -> Color(0xFF2E7D32)
+                                            isError -> MaterialTheme.colorScheme.error
+                                            else -> MaterialTheme.colorScheme.primary
+                                        },
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = line.removePrefix("[+]").removePrefix("[-]").removePrefix("[*]").trim(),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = when {
+                                            isError -> MaterialTheme.colorScheme.error
+                                            else -> MaterialTheme.colorScheme.onSurface
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
 
-                if (flashSuccess == true) {
+                // Action Buttons
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .animateContentSize(
+                            animationSpec = spring(
+                                stiffness = Spring.StiffnessMediumLow,
+                                dampingRatio = Spring.DampingRatioNoBouncy
+                            )
+                        ),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                     Button(
-                        onClick = { showConfirmRebootDialog = true },
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
-                        modifier = Modifier.weight(1f).height(50.dp)
+                        onClick = { showConfirmFlashDialog = true },
+                        enabled = isPermissionGranted && selectedImage != null && !isFlashing,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(50.dp)
                     ) {
-                        Icon(Icons.Default.RestartAlt, contentDescription = null)
+                        Icon(Icons.Default.FlashOn, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Reboot Device", style = MaterialTheme.typography.titleMedium)
+                        Text("Flash Image", style = MaterialTheme.typography.titleMedium)
+                    }
+
+                    if (flashSuccess == true) {
+                        Button(
+                            onClick = { showConfirmRebootDialog = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(50.dp)
+                        ) {
+                            Icon(Icons.Default.RestartAlt, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Reboot Device", style = MaterialTheme.typography.titleMedium)
+                        }
                     }
                 }
             }

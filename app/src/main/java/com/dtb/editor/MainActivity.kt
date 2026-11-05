@@ -219,70 +219,137 @@ fun MainScreen(viewModel: DtbViewModel = viewModel()) {
                     .blur(if (isProcessing) 10.dp else 0.dp)
             ) {
                 val currentFile = fileState
-                if (showFlasherScreen) {
-                    VendorBootFlasherScreen(
-                        viewModel = viewModel,
-                        onClose = { showFlasherScreen = false }
-                    )
-                } else if (currentFile == null) {
-                    Column(
-                        modifier = Modifier.fillMaxSize().padding(24.dp),
-                        verticalArrangement = Arrangement.Center,
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text("DTB Editor", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                        Spacer(modifier = Modifier.height(32.dp))
-                        Button(onClick = { openLauncher.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth().height(56.dp)) {
-                            Icon(Icons.Default.FolderOpen, null)
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text("Import Vendor Boot Image", style = MaterialTheme.typography.titleMedium)
+                val destination = when {
+                    showFlasherScreen -> "flasher"
+                    currentFile != null -> "editor"
+                    else -> "home"
+                }
+
+                AnimatedContent(
+                    targetState = destination,
+                    transitionSpec = {
+                        if (targetState == "flasher") {
+                            // Android 16 fluid spatial spring forward transition
+                            (slideInHorizontally(
+                                initialOffsetX = { fullWidth -> (fullWidth * 0.35f).toInt() },
+                                animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy)
+                            ) + fadeIn(
+                                animationSpec = tween(durationMillis = 320, easing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1.0f))
+                            ) + scaleIn(
+                                initialScale = 0.92f,
+                                animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy)
+                            )).togetherWith(
+                                slideOutHorizontally(
+                                    targetOffsetX = { fullWidth -> (-fullWidth * 0.15f).toInt() },
+                                    animationSpec = tween(260, easing = CubicBezierEasing(0.3f, 0.0f, 0.8f, 0.15f))
+                                ) + fadeOut(
+                                    animationSpec = tween(200)
+                                ) + scaleOut(
+                                    targetScale = 0.96f,
+                                    animationSpec = tween(260)
+                                )
+                            )
+                        } else if (initialState == "flasher") {
+                            // Android 16 fluid spatial return transition
+                            (slideInHorizontally(
+                                initialOffsetX = { fullWidth -> (-fullWidth * 0.15f).toInt() },
+                                animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy)
+                            ) + fadeIn(
+                                animationSpec = tween(280)
+                            ) + scaleIn(
+                                initialScale = 0.96f,
+                                animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy)
+                            )).togetherWith(
+                                slideOutHorizontally(
+                                    targetOffsetX = { fullWidth -> (fullWidth * 0.35f).toInt() },
+                                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy)
+                                ) + fadeOut(
+                                    animationSpec = tween(200)
+                                ) + scaleOut(
+                                    targetScale = 0.92f,
+                                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy)
+                                )
+                            )
+                        } else {
+                            (fadeIn(animationSpec = tween(300)) + scaleIn(initialScale = 0.97f)).togetherWith(
+                                fadeOut(animationSpec = tween(250)) + scaleOut(targetScale = 0.97f)
+                            )
                         }
-                        Spacer(modifier = Modifier.height(16.dp))
-                        OutlinedButton(onClick = { openLauncher.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth().height(56.dp)) {
-                            Icon(Icons.Default.Code, null)
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text("Import Device Tree Blob", style = MaterialTheme.typography.titleMedium)
+                    },
+                    label = "fluid_screen_transition"
+                ) { dest ->
+                    when (dest) {
+                        "flasher" -> {
+                            VendorBootFlasherScreen(
+                                viewModel = viewModel,
+                                onClose = { showFlasherScreen = false }
+                            )
                         }
-                        Spacer(modifier = Modifier.height(16.dp))
-                        ElevatedButton(
-                            onClick = {
-                                coroutineScope.launch {
-                                    val rooted = viewModel.checkRootAccess()
-                                    if (rooted) {
-                                        showFlasherScreen = true
-                                    } else {
-                                        showRootRequiredDialog = true
-                                    }
+                        "home" -> {
+                            Column(
+                                modifier = Modifier.fillMaxSize().padding(24.dp),
+                                verticalArrangement = Arrangement.Center,
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text("DTB Editor", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                Spacer(modifier = Modifier.height(32.dp))
+                                Button(onClick = { openLauncher.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth().height(56.dp)) {
+                                    Icon(Icons.Default.FolderOpen, null)
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text("Import Vendor Boot Image", style = MaterialTheme.typography.titleMedium)
                                 }
-                            },
-                            modifier = Modifier.fillMaxWidth().height(56.dp)
-                        ) {
-                            Icon(Icons.Default.FlashOn, null)
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text("Vendor Boot Flasher", style = MaterialTheme.typography.titleMedium)
-                        }
-                    }
-                } else {
-                    val isMt6789 = currentFile.cpuTopology.model.equals("MT6789", ignoreCase = true)
-                    if (isMt6789) {
-                        Column(modifier = Modifier.fillMaxSize()) {
-                            if (currentFile.hasAvbFooter) {
-                                Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
-                                    Text("The AVB footer will be removed. Verification must already be disabled on the device.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.padding(12.dp))
+                                Spacer(modifier = Modifier.height(16.dp))
+                                OutlinedButton(onClick = { openLauncher.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth().height(56.dp)) {
+                                    Icon(Icons.Default.Code, null)
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text("Import Device Tree Blob", style = MaterialTheme.typography.titleMedium)
+                                }
+                                Spacer(modifier = Modifier.height(16.dp))
+                                ElevatedButton(
+                                    onClick = {
+                                        coroutineScope.launch {
+                                            val rooted = viewModel.checkRootAccess()
+                                            if (rooted) {
+                                                showFlasherScreen = true
+                                            } else {
+                                                showRootRequiredDialog = true
+                                            }
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth().height(56.dp)
+                                ) {
+                                    Icon(Icons.Default.FlashOn, null)
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text("Vendor Boot Flasher", style = MaterialTheme.typography.titleMedium)
                                 }
                             }
-                            Box(modifier = Modifier.weight(1f)) {
-                                AnimatedContent(targetState = activeTab, transitionSpec = { fadeIn(animationSpec = tween(300)) togetherWith fadeOut(animationSpec = tween(300)) }, label = "tab_transition") { targetTab ->
-                                    when (targetTab) {
-                                        AppTab.CPU -> CpuTopologyScreen(fileState = currentFile, viewModel = viewModel)
-                                        AppTab.DTS -> EditorScreen(fileState = currentFile, viewModel = viewModel)
+                        }
+                        "editor" -> {
+                            val openFile = currentFile
+                            if (openFile != null) {
+                                val isMt6789 = openFile.cpuTopology.model.equals("MT6789", ignoreCase = true)
+                                if (isMt6789) {
+                                    Column(modifier = Modifier.fillMaxSize()) {
+                                        if (openFile.hasAvbFooter) {
+                                            Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
+                                                Text("The AVB footer will be removed. Verification must already be disabled on the device.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.padding(12.dp))
+                                            }
+                                        }
+                                        Box(modifier = Modifier.weight(1f)) {
+                                            AnimatedContent(targetState = activeTab, transitionSpec = { fadeIn(animationSpec = tween(300)) togetherWith fadeOut(animationSpec = tween(300)) }, label = "tab_transition") { targetTab ->
+                                                when (targetTab) {
+                                                    AppTab.CPU -> CpuTopologyScreen(fileState = openFile, viewModel = viewModel)
+                                                    AppTab.DTS -> EditorScreen(fileState = openFile, viewModel = viewModel)
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        Text("Unsupported device model: ${openFile.cpuTopology.model}\nThis app is exclusively for MT6789.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.error)
                                     }
                                 }
                             }
-                        }
-                    } else {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("Unsupported device model: ${currentFile.cpuTopology.model}\nThis app is exclusively for MT6789.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.error)
                         }
                     }
                 }
