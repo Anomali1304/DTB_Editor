@@ -754,40 +754,70 @@ fun VendorBootFlasherScreen(
                 }
 
                 // Action Buttons
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .animateContentSize(
-                            animationSpec = spring(
-                                stiffness = Spring.StiffnessMediumLow,
-                                dampingRatio = Spring.DampingRatioNoBouncy
-                            )
-                        ),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Button(
-                        onClick = { showConfirmFlashDialog = true },
-                        enabled = isPermissionGranted && selectedImage != null && !isFlashing && !isLoadingImage,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(50.dp)
-                    ) {
-                        Icon(Icons.Default.FlashOn, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Flash Image", style = MaterialTheme.typography.titleMedium)
-                    }
+                AnimatedContent(
+                    targetState = flashSuccess,
+                    transitionSpec = {
+                        (fadeIn(animationSpec = tween(260)) + scaleIn(initialScale = 0.96f))
+                            .togetherWith(fadeOut(animationSpec = tween(180)) + scaleOut(targetScale = 0.98f))
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "actionButtonsAnim"
+                ) { successState ->
+                    if (successState == true) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    flashSuccess = null
+                                    selectedImage = null
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(50.dp)
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Flash Another")
+                            }
 
-                    if (flashSuccess == true) {
+                            Button(
+                                onClick = { showConfirmRebootDialog = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                modifier = Modifier
+                                    .weight(1.2f)
+                                    .height(50.dp)
+                            ) {
+                                Icon(Icons.Default.RestartAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Reboot Device", style = MaterialTheme.typography.titleMedium)
+                            }
+                        }
+                    } else {
                         Button(
-                            onClick = { showConfirmRebootDialog = true },
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
+                            onClick = { showConfirmFlashDialog = true },
+                            enabled = isPermissionGranted && selectedImage != null && !isFlashing && !isLoadingImage,
                             modifier = Modifier
-                                .weight(1f)
+                                .fillMaxWidth()
                                 .height(50.dp)
                         ) {
-                            Icon(Icons.Default.RestartAlt, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Reboot Device", style = MaterialTheme.typography.titleMedium)
+                            if (isFlashing) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Flashing Image...", style = MaterialTheme.typography.titleMedium)
+                            } else {
+                                Icon(Icons.Default.FlashOn, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    if (successState == false) "Retry Flash" else "Flash Image",
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                            }
                         }
                     }
                 }
