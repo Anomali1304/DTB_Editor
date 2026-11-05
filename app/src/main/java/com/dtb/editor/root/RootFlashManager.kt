@@ -1,6 +1,7 @@
 package com.dtb.editor.root
 
 import android.content.Context
+import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -53,6 +54,40 @@ class RootFlashManager {
         )
     }
 
+    suspend fun flashVendorBootFromUriWithLogs(
+        context: Context,
+        imageUri: Uri,
+        targetPartitionName: String,
+        onLog: (String) -> Unit
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val tempFile = File(context.cacheDir, "flash_vendor_boot_temp.img")
+        try {
+            onLog("- Streaming image payload from storage...")
+            var copiedBytes = 0L
+            context.contentResolver.openInputStream(imageUri)?.use { input ->
+                tempFile.outputStream().use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    var bytesRead: Int
+                    while (input.read(buffer).also { bytesRead = it } != -1) {
+                        output.write(buffer, 0, bytesRead)
+                        copiedBytes += bytesRead
+                    }
+                    output.flush()
+                }
+            } ?: return@withContext Result.failure(Exception("Unable to read image from storage"))
+            onLog("- Payload prepared: ${tempFile.name} ($copiedBytes bytes)")
+
+            flashPayloadFile(tempFile, targetPartitionName, onLog)
+        } catch (e: Exception) {
+            onLog("[-] Exception occurred: ${e.message}")
+            Result.failure(e)
+        } finally {
+            if (tempFile.exists()) {
+                tempFile.delete()
+            }
+        }
+    }
+
     suspend fun flashVendorBootImageWithLogs(
         context: Context,
         imageBytes: ByteArray,
@@ -65,79 +100,7 @@ class RootFlashManager {
             tempFile.writeBytes(imageBytes)
             onLog("- Temporary payload saved: ${tempFile.name}")
 
-            val partitions = if (targetPartitionName == "both") {
-                listOf("vendor_boot_a", "vendor_boot_b")
-            } else {
-                listOf(targetPartitionName)
-            }
-
-            for (part in partitions) {
-                onLog("- Target partition: $part")
-                onLog("- Locating block device path for $part...")
-
-                val cmd = """
-                    PART="$part"
-                    TEMP="${tempFile.absolutePath}"
-                    TARGET=""
-                    if [ -b "/dev/block/by-name/${'$'}PART" ]; then
-                        TARGET="/dev/block/by-name/${'$'}PART"
-                    elif [ -b "/dev/block/bootdevice/by-name/${'$'}PART" ]; then
-                        TARGET="/dev/block/bootdevice/by-name/${'$'}PART"
-                    else
-                        TARGET=${'$'}(find /dev/block -name "${'$'}PART" 2>/dev/null | head -n 1)
-                    fi
-
-                    if [ -z "${'$'}TARGET" ]; then
-                        echo "ERROR: Partition ${'$'}PART block device not found"
-                        exit 1
-                    fi
-
-                    echo "DEVICE: ${'$'}TARGET"
-                    dd if="${'$'}TEMP" of="${'$'}TARGET" bs=4M conv=fsync status=none
-                    RES=${'$'}?
-                    sync
-                    if [ ${'$'}RES -eq 0 ]; then
-                        echo "SUCCESS: Flashed ${'$'}PART to ${'$'}TARGET"
-                    else
-                        echo "ERROR: dd failed with code ${'$'}RES"
-                        exit ${'$'}RES
-                    fi
-                """.trimIndent()
-
-                onLog("- Writing image payload to $part...")
-                val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
-                val outputLines = mutableListOf<String>()
-
-                process.inputStream.bufferedReader().useLines { lines ->
-                    lines.forEach { line ->
-                        outputLines.add(line)
-                        if (line.startsWith("DEVICE:")) {
-                            onLog("- Resolved block device: ${line.removePrefix("DEVICE:").trim()}")
-                        } else if (line.startsWith("SUCCESS:")) {
-                            onLog("[+] ${line.trim()}")
-                        } else if (line.startsWith("ERROR:")) {
-                            onLog("[-] ${line.trim()}")
-                        }
-                    }
-                }
-
-                val errOutput = process.errorStream.bufferedReader().use { it.readText().trim() }
-                if (errOutput.isNotEmpty()) {
-                    onLog("[-] $errOutput")
-                }
-
-                val exitCode = process.waitFor()
-                if (exitCode != 0) {
-                    onLog("[-] Command failed with exit code $exitCode")
-                    return@withContext Result.failure(Exception("Failed to flash $part (exit code $exitCode)"))
-                } else {
-                    onLog("[+] Partition $part flashed successfully!")
-                }
-            }
-
-            onLog("- Filesystem synced.")
-            onLog("[+] All operations completed successfully!")
-            Result.success("Flash completed successfully")
+            flashPayloadFile(tempFile, targetPartitionName, onLog)
         } catch (e: Exception) {
             onLog("[-] Exception occurred: ${e.message}")
             Result.failure(e)
@@ -146,6 +109,86 @@ class RootFlashManager {
                 tempFile.delete()
             }
         }
+    }
+
+    private suspend fun flashPayloadFile(
+        tempFile: File,
+        targetPartitionName: String,
+        onLog: (String) -> Unit
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val partitions = if (targetPartitionName == "both") {
+            listOf("vendor_boot_a", "vendor_boot_b")
+        } else {
+            listOf(targetPartitionName)
+        }
+
+        for (part in partitions) {
+            onLog("- Target partition: $part")
+            onLog("- Locating block device path for $part...")
+
+            val cmd = """
+                PART="$part"
+                TEMP="${tempFile.absolutePath}"
+                TARGET=""
+                if [ -b "/dev/block/by-name/${'$'}PART" ]; then
+                    TARGET="/dev/block/by-name/${'$'}PART"
+                elif [ -b "/dev/block/bootdevice/by-name/${'$'}PART" ]; then
+                    TARGET="/dev/block/bootdevice/by-name/${'$'}PART"
+                else
+                    TARGET=${'$'}(find /dev/block -name "${'$'}PART" 2>/dev/null | head -n 1)
+                fi
+
+                if [ -z "${'$'}TARGET" ]; then
+                    echo "ERROR: Partition ${'$'}PART block device not found"
+                    exit 1
+                fi
+
+                echo "DEVICE: ${'$'}TARGET"
+                dd if="${'$'}TEMP" of="${'$'}TARGET" bs=4M conv=fsync status=none
+                RES=${'$'}?
+                sync
+                if [ ${'$'}RES -eq 0 ]; then
+                    echo "SUCCESS: Flashed ${'$'}PART to ${'$'}TARGET"
+                else
+                    echo "ERROR: dd failed with code ${'$'}RES"
+                    exit ${'$'}RES
+                fi
+            """.trimIndent()
+
+            onLog("- Writing image payload to $part...")
+            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+            val outputLines = mutableListOf<String>()
+
+            process.inputStream.bufferedReader().useLines { lines ->
+                lines.forEach { line ->
+                    outputLines.add(line)
+                    if (line.startsWith("DEVICE:")) {
+                        onLog("- Resolved block device: ${line.removePrefix("DEVICE:").trim()}")
+                    } else if (line.startsWith("SUCCESS:")) {
+                        onLog("[+] ${line.trim()}")
+                    } else if (line.startsWith("ERROR:")) {
+                        onLog("[-] ${line.trim()}")
+                    }
+                }
+            }
+
+            val errOutput = process.errorStream.bufferedReader().use { it.readText().trim() }
+            if (errOutput.isNotEmpty()) {
+                onLog("[-] $errOutput")
+            }
+
+            val exitCode = process.waitFor()
+            if (exitCode != 0) {
+                onLog("[-] Command failed with exit code $exitCode")
+                return@withContext Result.failure(Exception("Failed to flash $part (exit code $exitCode)"))
+            } else {
+                onLog("[+] Partition $part flashed successfully!")
+            }
+        }
+
+        onLog("- Filesystem synced.")
+        onLog("[+] All operations completed successfully!")
+        Result.success("Flash completed successfully")
     }
 
     suspend fun flashVendorBootImage(

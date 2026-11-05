@@ -30,9 +30,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 data class SelectedImageInfo(
+    val uri: Uri,
     val name: String,
     val sizeBytes: Long,
-    val bytes: ByteArray,
     val isStandardVendorBoot: Boolean
 )
 
@@ -53,6 +53,7 @@ fun VendorBootFlasherScreen(
     var selectedTarget by remember { mutableStateOf("active") }
 
     var selectedImage by remember { mutableStateOf<SelectedImageInfo?>(null) }
+    var isLoadingImage by remember { mutableStateOf(false) }
     var isFlashing by remember { mutableStateOf(false) }
     var flashSuccess by remember { mutableStateOf<Boolean?>(null) }
     val stepLogs = remember { mutableStateListOf<String>() }
@@ -84,46 +85,69 @@ fun VendorBootFlasherScreen(
         }
     }
 
-    // File picker to import vendor_boot.img from storage
+    // File picker to import vendor_boot.img from storage (instant header check without RAM spike)
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) {
             coroutineScope.launch {
+                isLoadingImage = true
                 try {
-                    var fileName = "vendor_boot.img"
-                    var fileSize = 0L
+                    val info = withContext(Dispatchers.IO) {
+                        var fileName = "vendor_boot.img"
+                        var fileSize = 0L
 
-                    context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                        if (cursor.moveToFirst()) {
-                            val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                            val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
-                            if (nameIdx != -1) fileName = cursor.getString(nameIdx) ?: fileName
-                            if (sizeIdx != -1) fileSize = cursor.getLong(sizeIdx)
+                        // Safely query display name and size on IO dispatcher
+                        try {
+                            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                                if (cursor.moveToFirst()) {
+                                    val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                                    val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
+                                    if (nameIdx != -1) fileName = cursor.getString(nameIdx) ?: fileName
+                                    if (sizeIdx != -1) fileSize = cursor.getLong(sizeIdx)
+                                }
+                            }
+                        } catch (_: Exception) {}
+
+                        // Read ONLY the header (first 64 bytes) to instantly verify format without loading 64-128MB into RAM!
+                        var isVb = false
+                        try {
+                            context.contentResolver.openInputStream(uri)?.use { stream ->
+                                val headerBuffer = ByteArray(64)
+                                val readCount = stream.read(headerBuffer)
+                                if (readCount >= 8) {
+                                    isVb = VendorBoot.isVendorBoot(headerBuffer)
+                                }
+                            }
+                        } catch (_: Exception) {}
+
+                        if (fileSize <= 0) {
+                            try {
+                                context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                                    fileSize = pfd.statSize
+                                }
+                            } catch (_: Exception) {}
                         }
-                    }
 
-                    val bytes = withContext(Dispatchers.IO) {
-                        context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                    }
-
-                    if (bytes != null && bytes.isNotEmpty()) {
-                        val isVb = VendorBoot.isVendorBoot(bytes)
-                        selectedImage = SelectedImageInfo(
+                        SelectedImageInfo(
+                            uri = uri,
                             name = fileName,
-                            sizeBytes = if (fileSize > 0) fileSize else bytes.size.toLong(),
-                            bytes = bytes,
+                            sizeBytes = fileSize,
                             isStandardVendorBoot = isVb
                         )
-                        stepLogs.add("Loaded image: $fileName (${formatFileSize(bytes.size.toLong())})")
-                        if (isVb) {
-                            stepLogs.add("Image header verified: Android vendor_boot format")
-                        } else {
-                            stepLogs.add("Notice: Raw partition image loaded")
-                        }
+                    }
+
+                    selectedImage = info
+                    stepLogs.add("Selected: ${info.name} (${formatFileSize(info.sizeBytes)})")
+                    if (info.isStandardVendorBoot) {
+                        stepLogs.add("Header verified: Android vendor_boot format")
+                    } else {
+                        stepLogs.add("Notice: Raw partition image loaded")
                     }
                 } catch (e: Exception) {
-                    stepLogs.add("Error loading image: ${e.message}")
+                    stepLogs.add("Error inspecting image: ${e.message}")
+                } finally {
+                    isLoadingImage = false
                 }
             }
         }
@@ -202,13 +226,13 @@ fun VendorBootFlasherScreen(
                         showConfirmFlashDialog = false
                         isFlashing = true
                         flashSuccess = null
-                        val imgBytes = selectedImage!!.bytes
+                        val imgUri = selectedImage!!.uri
                         stepLogs.add("Starting flash operation to $targetName...")
 
                         coroutineScope.launch {
-                            val result = viewModel.rootFlashManager.flashVendorBootImageWithLogs(
+                            val result = viewModel.rootFlashManager.flashVendorBootFromUriWithLogs(
                                 context = context,
-                                imageBytes = imgBytes,
+                                imageUri = imgUri,
                                 targetPartitionName = targetName,
                                 onLog = { line ->
                                     stepLogs.add(line)
@@ -454,7 +478,7 @@ fun VendorBootFlasherScreen(
                             if (selectedImage != null) {
                                 TextButton(
                                     onClick = { filePickerLauncher.launch(arrayOf("*/*")) },
-                                    enabled = !isFlashing
+                                    enabled = !isFlashing && !isLoadingImage
                                 ) {
                                     Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
@@ -464,20 +488,38 @@ fun VendorBootFlasherScreen(
                         }
 
                         AnimatedContent(
-                            targetState = selectedImage,
+                            targetState = Pair(isLoadingImage, selectedImage),
                             transitionSpec = {
                                 (fadeIn(tween(220)) + scaleIn(initialScale = 0.97f))
                                     .togetherWith(fadeOut(tween(160)) + scaleOut(targetScale = 0.98f))
                             },
                             label = "imageSourceAnim"
-                        ) { imageInfo ->
-                            if (imageInfo == null) {
+                        ) { (loading, imageInfo) ->
+                            if (loading) {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(14.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.5.dp)
+                                        Text(
+                                            "Verifying vendor_boot image header...",
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    }
+                                }
+                            } else if (imageInfo == null) {
                                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     FilledTonalButton(
                                         onClick = { filePickerLauncher.launch(arrayOf("*/*")) },
                                         modifier = Modifier.fillMaxWidth().height(52.dp),
                                         shape = RoundedCornerShape(12.dp),
-                                        enabled = !isFlashing
+                                        enabled = !isFlashing && !isLoadingImage
                                     ) {
                                         Icon(Icons.Default.FileOpen, contentDescription = null)
                                         Spacer(modifier = Modifier.width(8.dp))
@@ -725,7 +767,7 @@ fun VendorBootFlasherScreen(
                 ) {
                     Button(
                         onClick = { showConfirmFlashDialog = true },
-                        enabled = isPermissionGranted && selectedImage != null && !isFlashing,
+                        enabled = isPermissionGranted && selectedImage != null && !isFlashing && !isLoadingImage,
                         modifier = Modifier
                             .weight(1f)
                             .height(50.dp)
