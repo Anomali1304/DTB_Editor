@@ -156,7 +156,7 @@ fun CpuTopologyScreen(
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Text(
-                                    if (syncCpufreq) "Modifies performance-controller reg (Requires custom kernel)" else "Cpu-Map Only Mode (Safe for Stock Kernel Boot)",
+                                    if (syncCpufreq) "Synchronizes performance-controller reg & domain slots (Full Cpufreq Hardware Sync)" else "Cpu-Map Only Mode (Safe Topology Only)",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = if (syncCpufreq) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
                                 )
