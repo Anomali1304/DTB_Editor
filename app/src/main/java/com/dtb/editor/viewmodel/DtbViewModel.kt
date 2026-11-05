@@ -78,7 +78,7 @@ class DtbViewModel(
     private val topologyManager: CpuTopologyManager = CpuTopologyManager(),
     private val vendorBoot: VendorBoot = VendorBoot(),
     private val dtbPayloadHelper: DtbPayloadHelper = DtbPayloadHelper(),
-    private val rootFlashManager: com.dtb.editor.root.RootFlashManager = com.dtb.editor.root.RootFlashManager()
+    val rootFlashManager: com.dtb.editor.root.RootFlashManager = com.dtb.editor.root.RootFlashManager()
 ) : ViewModel() {
 
     suspend fun checkRootAccess(): Boolean {
@@ -104,7 +104,7 @@ class DtbViewModel(
             _isProcessing.value = true
             withContext(Dispatchers.IO) {
                 try {
-                    onLogLine("[*] Preparing vendor_boot image payload...")
+                    onLogLine("Preparing vendor_boot image payload...")
                     val bytesToSave = prepareSaveBytes()
                     if (bytesToSave == null) {
                         val msg = "Failed to generate image payload"
@@ -113,15 +113,15 @@ class DtbViewModel(
                         return@withContext
                     }
 
-                    onLogLine("[*] Checking root access...")
+                    onLogLine("Checking superuser permissions...")
                     val isRooted = rootFlashManager.checkRootAccess()
                     if (!isRooted) {
-                        val msg = "Root access denied or su binary not found"
+                        val msg = "Superuser permission denied or su binary not found"
                         onLogLine("[-] $msg")
                         onFinished(false, msg)
                         return@withContext
                     }
-                    onLogLine("[+] Root access granted (uid=0)")
+                    onLogLine("Superuser permission verified")
 
                     val result = rootFlashManager.flashVendorBootImageWithLogs(
                         context,

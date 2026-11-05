@@ -104,7 +104,7 @@ class RootFlashManager {
                     fi
                 """.trimIndent()
 
-                onLog("- Executing root shell command: dd to $part...")
+                onLog("- Writing image payload to $part...")
                 val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
                 val outputLines = mutableListOf<String>()
 

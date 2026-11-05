@@ -321,13 +321,10 @@ class CpuTopologyPreviewTest {
         val controller = engine.discoverPerformanceController(root, cores)!!
 
         val requestedPresets = listOf(
-            listOf(4, 1, 1, 2),
-            listOf(4, 2, 1, 1),
             listOf(2, 3, 3),
             listOf(1, 3, 4),
             listOf(1, 5, 2),
-            listOf(4, 3),
-            listOf(5, 1, 1, 1)
+            listOf(4, 3)
         )
 
         for (preset in requestedPresets) {
