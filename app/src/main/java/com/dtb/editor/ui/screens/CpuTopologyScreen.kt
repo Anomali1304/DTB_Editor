@@ -57,10 +57,12 @@ fun CpuTopologyScreen(
     var draftConfigs by remember(fileState.currentDtsText) {
         val initial = if (top.clusters.isNotEmpty()) {
             top.clusters.map { cluster ->
+                val clusterCoreDetails = cluster.cores.mapNotNull { coreInfo -> allCores.getOrNull(coreInfo.coreIndex) }
+                val existingSlot = clusterCoreDetails.firstNotNullOfOrNull { it.originalSlotAddress }
                 ClusterConfig(
                     clusterIndex = cluster.index,
                     cpuIndices = cluster.cores.map { it.coreIndex },
-                    selectedDomainSlot = null
+                    selectedDomainSlot = existingSlot
                 )
             }
         } else {

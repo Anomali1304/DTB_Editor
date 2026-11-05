@@ -34,8 +34,8 @@ class TopologyEngine {
 
         val uniqueManualSlots = clusterConfigs.mapNotNull { it.selectedDomainSlot }.toSet()
         val isSharedPolicyPlan = maxClusters != null && clusterConfigs.size > maxClusters &&
-                uniqueManualSlots.isNotEmpty() && uniqueManualSlots.size <= maxClusters &&
-                clusterConfigs.all { it.selectedDomainSlot != null }
+                clusterConfigs.all { it.selectedDomainSlot != null } &&
+                uniqueManualSlots.size <= maxClusters
 
         if (maxClusters != null && !isSharedPolicyPlan && clusterConfigs.size > maxClusters) {
             errors.add("Requested cluster count (${clusterConfigs.size}) exceeds available cpufreq performance domain slots (maximum $maxClusters slots)")
@@ -146,7 +146,8 @@ class TopologyEngine {
                     }
                 }
             } else {
-                warnings.add("Shared Policy Mode: ${clusterConfigs.size} clusters sharing ${uniqueManual.size} cpufreq domain slots.")
+                val usedSlotsCount = if (uniqueManual.isNotEmpty()) uniqueManual.size else minOf(clusterConfigs.size, maxSlots)
+                warnings.add("Shared Policy Mode: ${clusterConfigs.size} clusters sharing $usedSlotsCount cpufreq domain slots.")
             }
 
             if (errors.isEmpty()) {
@@ -447,7 +448,7 @@ class TopologyEngine {
             }
         )
 
-        // 3. Assign slots strictly without silent fallback
+        // 3. Assign slots strictly without silent fallback, unless sharing
         for (cluster in sortedClusters) {
             val clusterCores = cluster.cpuIndices.mapNotNull { idx -> cpuCores.getOrNull(idx) }
             val highestCapCore = clusterCores.maxByOrNull { (it.capacity ?: 0L) * 10000L + it.regAddress }
@@ -460,7 +461,8 @@ class TopologyEngine {
                 val nextSlot = availablePool.removeAt(0)
                 assignment[cluster.clusterIndex] = nextSlot
             } else {
-                throw IllegalStateException("Insufficient available performance domain slots for cluster ${cluster.clusterIndex}")
+                val fallbackSlot = origSlot ?: controllerInfo.availableSlots.last()
+                assignment[cluster.clusterIndex] = fallbackSlot
             }
         }
 
