@@ -339,15 +339,21 @@ class CpuTopologyPreviewTest {
                 currentCpu += size
             }
 
-            val finalConfigs = if (preset.size > 3) {
-                configs.mapIndexed { idx, config ->
+            val finalConfigs = when {
+                preset == listOf(4, 3) -> listOf(
+                    ClusterConfig(0, listOf(0, 1, 2, 3)),
+                    ClusterConfig(1, listOf(4, 5, 6)),
+                    ClusterConfig(2, listOf(7))
+                )
+                preset.size > 3 -> configs.mapIndexed { idx, config ->
                     when (idx) {
                         0 -> config.copy(selectedDomainSlot = 0x11bc10L)
                         1 -> config.copy(selectedDomainSlot = 0x11be50L)
                         else -> config.copy(selectedDomainSlot = 0x11bd30L)
                     }
                 }
-            } else configs
+                else -> configs
+            }
 
             val preview = engine.previewPlan(finalConfigs, cores, controller, syncCpufreq = true)
             assertTrue("Preset $preset preview must be valid", preview.isValid)

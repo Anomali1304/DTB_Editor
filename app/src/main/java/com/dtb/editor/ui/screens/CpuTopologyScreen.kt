@@ -169,7 +169,7 @@ fun CpuTopologyScreen(
                             listOf(2, 3, 3) -> "2+3+3 (Tri-Cluster)"
                             listOf(1, 3, 4) -> "1+3+4 (Tri-Cluster)"
                             listOf(1, 5, 2) -> "1+5+2 (Tri-Cluster)"
-                            listOf(4, 3) -> "4+3 (Dual-Cluster Partial)"
+                            listOf(4, 3) -> "4+3+1 (Tri-Cluster)"
                             listOf(5, 1, 1, 1) -> "5+1+1+1 (Quad-Cluster Shared Policy)"
                             else -> preset.joinToString("+")
                         }
@@ -414,6 +414,13 @@ private fun createConfigsFromSizes(sizes: List<Int>, totalCores: Int): List<Clus
             ClusterConfig(1, listOf(5), selectedDomainSlot = 0x11be50L),
             ClusterConfig(2, listOf(6), selectedDomainSlot = 0x11bd30L),
             ClusterConfig(3, listOf(7), selectedDomainSlot = 0x11bd30L)
+        )
+    }
+    if (sizes == listOf(4, 3) && totalCores == 8) {
+        return listOf(
+            ClusterConfig(0, listOf(0, 1, 2, 3)),
+            ClusterConfig(1, listOf(4, 5, 6)),
+            ClusterConfig(2, listOf(7))
         )
     }
     val configs = mutableListOf<ClusterConfig>()
