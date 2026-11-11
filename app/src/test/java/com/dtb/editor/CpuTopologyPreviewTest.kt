@@ -324,6 +324,7 @@ class CpuTopologyPreviewTest {
             listOf(2, 3, 3),
             listOf(1, 3, 4),
             listOf(1, 5, 2),
+            listOf(1, 2, 5),
             listOf(4, 3)
         )
 
