@@ -27,6 +27,9 @@
     <string name="dts_search_close">Close search</string>
     <string name="dts_search_match_case">Match case</string>
     <string name="dts_word_wrap">Toggle word wrap</string>
+    <string name="dts_format_syntax">Align &amp; format syntax</string>
+    <string name="dts_syntax_formatted">Syntax aligned</string>
+    <string name="dts_syntax_already_aligned">Syntax is already aligned</string>
     <string name="dts_go_to_line">Go to line</string>
     <string name="dts_go_to_line_hint">Line number (1–%1$d)</string>
     <string name="dts_jump_action">Jump</string>

@@ -1,8 +1,12 @@
 package com.dtb.editor
 
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.style.UnderlineSpan
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -15,9 +19,13 @@ import com.dtb.editor.fdt.parser.DtsChunker
 import com.dtb.editor.fdt.parser.DtsLineEditAction
 import com.dtb.editor.fdt.parser.DtsLineUndoManager
 import com.dtb.editor.fdt.parser.DtsParser
+import com.dtb.editor.fdt.parser.DtsSyntaxAligner
+import com.dtb.editor.fdt.parser.DtsTextDeltaUndoManager
+import com.dtb.editor.ui.screens.DtsOffsetSearchEngine
 import com.dtb.editor.ui.screens.DtsSearchEngine
 import com.dtb.editor.ui.screens.DtsSyntaxHighlighter
 import com.dtb.editor.ui.screens.DtsSyntaxPalette
+import com.dtb.editor.ui.screens.DtsSyntaxSpan
 import com.dtb.editor.ui.screens.EditorScreen
 import com.dtb.editor.viewmodel.DtbViewModel
 import com.dtb.editor.viewmodel.InputFileType
@@ -40,23 +48,19 @@ class DtsLineEditorTest {
         val manager = DtsLineUndoManager(maxStackSize = 50, coalesceWindowMs = 500L)
         val lines = mutableListOf("/ {", "    status = \"okay\";", "};")
 
-        // Coalesced typing on line 1 within 500ms
         manager.recordAction(DtsLineEditAction(1, listOf("    status = \"okay\";"), listOf("    status = \"o\";")), timestampMs = 1000L)
         lines[1] = "    status = \"o\";"
         manager.recordAction(DtsLineEditAction(1, listOf("    status = \"o\";"), listOf("    status = \"ok\";")), timestampMs = 1200L)
         lines[1] = "    status = \"ok\";"
 
-        // Single undo reverts entire coalesced burst back to "okay"
         val undo1 = manager.undo(lines)
         assertNotNull(undo1)
         assertEquals("    status = \"okay\";", lines[1])
         assertTrue(manager.canRedo)
 
-        // Redo restores "ok"
         manager.redo(lines)
         assertEquals("    status = \"ok\";", lines[1])
 
-        // Split line (Enter) at line 1 -> becomes 2 lines
         manager.recordAction(
             DtsLineEditAction(1, listOf("    status = \"ok\";"), listOf("    status = \"ok\";", "    new-prop = <0x1>;")),
             timestampMs = 3000L
@@ -75,6 +79,72 @@ class DtsLineEditorTest {
     }
 
     @Test
+    fun testTextDeltaUndoManagerCoalesceUndoAndRedo() {
+        val manager = DtsTextDeltaUndoManager(maxStackSize = 50, coalesceWindowMs = 700L)
+        val editable = SpannableStringBuilder("/ {\n    status = \"\";\n};")
+
+        // Coalesce typing "okay" inside quotes at offset 18
+        val insertAt = editable.indexOf("\"\"") + 1
+        editable.insert(insertAt, "o")
+        manager.recordChange(insertAt, "", "o", timestampMs = 1000L)
+        editable.insert(insertAt + 1, "k")
+        manager.recordChange(insertAt + 1, "", "k", timestampMs = 1100L)
+        editable.insert(insertAt + 2, "a")
+        manager.recordChange(insertAt + 2, "", "a", timestampMs = 1200L)
+        editable.insert(insertAt + 3, "y")
+        manager.recordChange(insertAt + 3, "", "y", timestampMs = 1300L)
+
+        assertTrue(editable.toString().contains("\"okay\""))
+
+        // Single undo removes entire coalesced typing burst
+        val cursorAfterUndo = manager.undo(editable)
+        assertEquals(insertAt, cursorAfterUndo)
+        assertTrue(editable.toString().contains("\"\""))
+        assertTrue(manager.canRedo)
+
+        // Single redo restores "okay"
+        val cursorAfterRedo = manager.redo(editable)
+        assertEquals(insertAt + 4, cursorAfterRedo)
+        assertTrue(editable.toString().contains("\"okay\""))
+
+        // Multi-line paste beyond coalesce window
+        val pastePos = editable.indexOf("};")
+        val pasted = "    cpu@0 { status = \"okay\"; };\n"
+        editable.insert(pastePos, pasted)
+        manager.recordChange(pastePos, "", pasted, timestampMs = 5000L)
+        assertTrue(editable.toString().contains("cpu@0"))
+
+        val undoPasteCursor = manager.undo(editable)
+        assertEquals(pastePos, undoPasteCursor)
+        assertFalse(editable.toString().contains("cpu@0"))
+    }
+
+    @Test
+    fun testOffsetSearchEngineCaseSensitivityAndPerformance() {
+        val builder = StringBuilder(400_000)
+        for (i in 0 until 10000) {
+            when (i) {
+                12 -> builder.append("    cpu@0 { compatible = \"arm,cortex-a76\"; };\n")
+                5432 -> builder.append("    CPU_CLUSTER_1: cpu-map { core0 { cpu = <&CPU0>; }; };\n")
+                9990 -> builder.append("    capacity-dmips-mhz = <1024>;\n")
+                else -> builder.append("    dummy-node-$i { reg = <0x0 0x${Integer.toHexString(i)}>; };\n")
+            }
+        }
+        val fullText = builder.toString()
+
+        val insensitive = DtsOffsetSearchEngine.findAllMatches(fullText, "cpu", matchCase = false)
+        assertEquals(5, insensitive.size)
+        assertEquals(12, insensitive[0].lineIndex)
+        assertEquals("cpu", fullText.substring(insensitive[0].startOffset, insensitive[0].endOffset))
+        assertEquals(5432, insensitive[1].lineIndex)
+
+        val sensitive = DtsOffsetSearchEngine.findAllMatches(fullText, "CPU", matchCase = true)
+        assertEquals(2, sensitive.size)
+        assertEquals(5432, sensitive[0].lineIndex)
+        assertEquals("CPU", fullText.substring(sensitive[0].startOffset, sensitive[0].endOffset))
+    }
+
+    @Test
     fun testSearchEngineCaseSensitivityAndPerformance() {
         val lines = ArrayList<String>(10000)
         for (i in 0 until 10000) {
@@ -89,7 +159,6 @@ class DtsLineEditorTest {
         }
 
         val insensitive = DtsSearchEngine.findAllMatches(lines, "cpu", matchCase = false)
-        // Line 12: "cpu@0" -> 1 match; Line 5432: "CPU_CLUSTER_1", "cpu-map", "cpu", "CPU0" -> 4 matches
         assertEquals(5, insensitive.size)
         assertEquals(12, insensitive[0].lineIndex)
         assertEquals(5432, insensitive[1].lineIndex)
@@ -100,7 +169,7 @@ class DtsLineEditorTest {
     }
 
     @Test
-    fun testSyntaxHighlighterHandlesEdgeCases() {
+    fun testSyntaxHighlighterViewportSpansPreservesNonSyntaxSpans() {
         val palette = DtsSyntaxPalette(
             text = Color.White,
             comment = Color.Gray,
@@ -115,26 +184,15 @@ class DtsLineEditorTest {
             activeMatchHighlightText = Color.White
         )
 
-        val samples = listOf(
-            "",
-            "/dts-v1/;",
-            "// full line comment",
-            "/* unclosed block comment",
-            "compatible = \"unclosed string",
-            "reg = <0x0 0x11bc10 0x0 0x120>;",
-            "performance-controller@11bc00 {"
-        )
+        val text = "/dts-v1/;\n// full line comment\ncompatible = \"arm,cortex-a76\";\nreg = <0x0 0x11bc10>;"
+        val spannable = SpannableStringBuilder(text)
+        val imeSpan = UnderlineSpan()
+        spannable.setSpan(imeSpan, 0, 5, Spanned.SPAN_COMPOSING)
 
-        for ((idx, line) in samples.withIndex()) {
-            val match = if (line.length >= 3) DtsSearchEngine.findAllMatches(listOf(line), line.take(3), false).firstOrNull()?.copy(lineIndex = idx) else null
-            val annotated = DtsSyntaxHighlighter.buildHighlightedLine(
-                line = line,
-                palette = palette,
-                lineMatches = listOfNotNull(match),
-                activeMatch = match
-            )
-            assertEquals(line, annotated.text)
-        }
+        DtsSyntaxHighlighter.applyViewportSyntaxSpans(spannable, 0, spannable.length, palette)
+
+        assertTrue(spannable.getSpans(0, spannable.length, DtsSyntaxSpan::class.java).isNotEmpty())
+        assertEquals(1, spannable.getSpans(0, spannable.length, UnderlineSpan::class.java).size)
     }
 
     @Test
@@ -179,18 +237,64 @@ class DtsLineEditorTest {
         }
         composeTestRule.waitForIdle()
 
-        // Shows total lines directly without dividing into parts
+        // Shows native full-document editor and line count without parts
+        composeTestRule.onNodeWithTag("dts_native_editor").assertIsDisplayed()
         composeTestRule.onNodeWithTag("dts_line_count_chip").assertIsDisplayed()
         composeTestRule.onNodeWithText("${state.dtsLines.size} lines").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("dts_wrap_toggle").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("dts_format_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("dts_undo_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("dts_redo_button").assertIsDisplayed()
 
         // Open search bar and search for the marker on line 1802
         composeTestRule.onNodeWithTag("dts_search_toggle").performClick()
         composeTestRule.waitForIdle()
 
         composeTestRule.onNodeWithTag("dts_search_input").performTextInput("target_marker_node")
-        composeTestRule.mainClock.advanceTimeBy(150)
-        composeTestRule.waitForIdle()
+        composeTestRule.mainClock.advanceTimeBy(200)
+        composeTestRule.waitUntil(timeoutMillis = 3000) {
+            composeTestRule.onAllNodesWithText("1 / 1").fetchSemanticsNodes().isNotEmpty()
+        }
 
         composeTestRule.onNodeWithTag("dts_search_counter").assertIsDisplayed()
+        composeTestRule.onNodeWithText("1 / 1").assertIsDisplayed()
+    }
+
+    @Test
+    fun testDtsSyntaxAlignerPreservesCommentsAndAlignsIndentation() {
+        val messy = """
+/dts-v1/;
+
+/ {
+cpu@0{
+compatible="arm,cortex-a76"; // keep comment { untouched }
+  reg = <0x0 0x100>;
+opp-table {
+opp-1000 {
+opp-hz = /bits/ 64 <1000000000>;
+};
+};
+};
+};
+""".trimIndent() + "\n"
+
+        val aligned = DtsSyntaxAligner.align(messy)
+        val expected = """
+/dts-v1/;
+
+/ {
+    cpu@0 {
+        compatible = "arm,cortex-a76"; // keep comment { untouched }
+        reg = <0x0 0x100>;
+        opp-table {
+            opp-1000 {
+                opp-hz = /bits/ 64 <1000000000>;
+            };
+        };
+    };
+};
+""".trimIndent() + "\n"
+
+        assertEquals(expected, aligned)
     }
 }

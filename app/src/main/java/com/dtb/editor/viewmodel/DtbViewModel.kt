@@ -23,6 +23,7 @@ import com.dtb.editor.fdt.parser.DtsFormatter
 import com.dtb.editor.fdt.parser.DtsLineEditAction
 import com.dtb.editor.fdt.parser.DtsLineUndoManager
 import com.dtb.editor.fdt.parser.DtsParser
+import com.dtb.editor.fdt.parser.DtsTextDeltaUndoManager
 import com.dtb.editor.fdt.parser.VendorBoot
 import com.dtb.editor.fdt.parser.VendorBootImage
 import kotlinx.coroutines.Dispatchers
@@ -65,6 +66,7 @@ data class OpenFileState(
     val cpuTopology: CpuTopologyState,
     val dtsLines: List<String> = splitDtsLines(currentDtsText),
     val lineUndoManager: DtsLineUndoManager = DtsLineUndoManager(),
+    val deltaUndoManager: DtsTextDeltaUndoManager = DtsTextDeltaUndoManager(),
     val dtsRevision: Int = 0
 ) {
     fun fullDtsText(): String = if (dtsLines.isNotEmpty()) dtsLines.joinToString("\n") else currentDtsText
@@ -180,33 +182,69 @@ class DtbViewModel(
     private val _snackbarMessage = MutableSharedFlow<String>()
     val snackbarMessage: SharedFlow<String> = _snackbarMessage.asSharedFlow()
 
+    @Volatile
+    var liveDtsTextProvider: (() -> String)? = null
+
+    private fun readCurrentDtsText(state: OpenFileState): String {
+        return liveDtsTextProvider?.invoke() ?: state.fullDtsText()
+    }
+
+    fun markDtsModified() {
+        val current = _openFileState.value ?: return
+        if (!current.isModified) {
+            _openFileState.value = current.copy(isModified = true)
+        }
+    }
+
+    fun showMessage(message: String) {
+        viewModelScope.launch {
+            _snackbarMessage.emit(message)
+        }
+    }
+
+    fun commitLiveDtsText(text: String) {
+        val current = _openFileState.value ?: return
+        if (text != current.currentDtsText || current.isModified) {
+            _openFileState.value = current.copy(
+                currentDtsText = text,
+                dtsLines = splitDtsLines(text),
+                chunks = DtsChunker.split(text),
+                isModified = text != current.originalDtsText || current.isModified
+            )
+        }
+    }
+
     fun selectTab(tab: AppTab) {
         if (tab == AppTab.CPU) {
             val current = _openFileState.value
-            if (current != null && current.isModified) {
-                viewModelScope.launch {
-                    _isProcessing.value = true
-                    withContext(Dispatchers.Default) {
-                        try {
-                            val fullText = current.fullDtsText()
-                            val parsed = DtsParser().parse(fullText)
-                            val topology = topologyManager.extractTopology(parsed.rootNode)
-                            _openFileState.value = current.copy(
-                                currentDtsText = fullText,
-                                chunks = DtsChunker.split(fullText),
-                                parsedAst = parsed.rootNode,
-                                cpuTopology = topology,
-                                isModified = false
-                            )
-                        } catch (e: Exception) {
-                            _snackbarMessage.emit(e.message ?: "Failed to process DTS")
-                        } finally {
-                            _isProcessing.value = false
+            if (current != null && (current.isModified || liveDtsTextProvider != null)) {
+                val liveText = readCurrentDtsText(current)
+                val needsReparse = current.isModified || liveText != current.currentDtsText
+                if (needsReparse) {
+                    viewModelScope.launch {
+                        _isProcessing.value = true
+                        withContext(Dispatchers.Default) {
+                            try {
+                                val parsed = DtsParser().parse(liveText)
+                                val topology = topologyManager.extractTopology(parsed.rootNode)
+                                _openFileState.value = current.copy(
+                                    currentDtsText = liveText,
+                                    dtsLines = splitDtsLines(liveText),
+                                    chunks = DtsChunker.split(liveText),
+                                    parsedAst = parsed.rootNode,
+                                    cpuTopology = topology,
+                                    isModified = false
+                                )
+                            } catch (e: Exception) {
+                                _snackbarMessage.emit(e.message ?: "Failed to process DTS")
+                            } finally {
+                                _isProcessing.value = false
+                            }
                         }
+                        _activeTab.value = tab
                     }
-                    _activeTab.value = tab
+                    return
                 }
-                return
             }
         }
         _activeTab.value = tab
@@ -326,6 +364,8 @@ class DtbViewModel(
         val undoManager = DtsChunkUndoManager()
         val lines = splitDtsLines(decompileRes.dtsText)
         val lineUndoManager = DtsLineUndoManager()
+        val deltaUndoManager = DtsTextDeltaUndoManager()
+        val nextRevision = (_openFileState.value?.dtsRevision ?: 0) + 1
 
         _openFileState.value = OpenFileState(
             fileName = fileName,
@@ -345,7 +385,8 @@ class DtbViewModel(
             cpuTopology = topology,
             dtsLines = lines,
             lineUndoManager = lineUndoManager,
-            dtsRevision = 0
+            deltaUndoManager = deltaUndoManager,
+            dtsRevision = nextRevision
         )
         _activeTab.value = AppTab.CPU
     }
@@ -490,7 +531,7 @@ class DtbViewModel(
             _isProcessing.value = true
             withContext(Dispatchers.Default) {
                 try {
-                    val fullText = current.fullDtsText()
+                    val fullText = readCurrentDtsText(current)
                     val beforeAst = DtsParser().parse(fullText).rootNode
                     val parsed = DtsParser().parse(fullText)
                     val (success, msg) = topologyManager.applyCustomPlan(parsed.rootNode, clusterConfigs, syncCpufreq, customCapacities)
@@ -514,6 +555,7 @@ class DtbViewModel(
                     val newChunks = DtsChunker.split(formattedDts)
                     current.lineUndoManager.clear()
                     current.undoManager.clear()
+                    current.deltaUndoManager.clear()
                     _openFileState.value = current.copy(
                         currentDtsText = formattedDts,
                         chunks = newChunks,
@@ -540,7 +582,7 @@ class DtbViewModel(
 
     fun prepareSaveBytes(): ByteArray? {
         val current = _openFileState.value ?: return null
-        val fullText = current.fullDtsText()
+        val fullText = readCurrentDtsText(current)
         return try {
             if (fullText == current.originalDtsText && !current.isModified) {
                 return current.originalBytes
@@ -641,7 +683,7 @@ class DtbViewModel(
             _isProcessing.value = true
             withContext(Dispatchers.IO) {
                 try {
-                    val fullText = current.fullDtsText()
+                    val fullText = readCurrentDtsText(current)
                     val bytesToSave = if (fullText == current.originalDtsText && !current.isModified) {
                         current.originalBytes
                     } else {
@@ -746,6 +788,7 @@ class DtbViewModel(
                     _openFileState.value = current.copy(
                         originalDtsText = fullText,
                         currentDtsText = fullText,
+                        dtsLines = splitDtsLines(fullText),
                         isModified = false
                     )
                     _snackbarMessage.emit("File saved successfully")
@@ -759,6 +802,7 @@ class DtbViewModel(
     }
 
     fun closeFile() {
+        liveDtsTextProvider = null
         _openFileState.value = null
         _pendingMultiDtb.value = null
     }
@@ -766,7 +810,7 @@ class DtbViewModel(
     fun getSuggestedFileName(): String {
         val current = _openFileState.value ?: return "output.dtb"
         val sizes = try {
-            val fullText = current.fullDtsText()
+            val fullText = readCurrentDtsText(current)
             val root = DtsParser().parse(fullText).rootNode
             val top = topologyManager.extractTopology(root)
             top.clusters.map { it.cores.size }

@@ -32,8 +32,8 @@ class DtsLineUndoManager(
             last.startLine == action.startLine &&
             last.newLines[0] == action.oldLines[0]
 
-        if (canCoalesce && last != null) {
-            undoStack[undoStack.lastIndex] = last.copy(newLines = action.newLines)
+        if (canCoalesce) {
+            undoStack[undoStack.lastIndex] = last!!.copy(newLines = action.newLines)
         } else {
             undoStack.add(action)
             if (undoStack.size > maxStackSize) {

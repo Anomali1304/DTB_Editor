@@ -1,6 +1,5 @@
 package com.dtb.editor.ui.screens
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,208 +20,13 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.zIndex
 import com.dtb.editor.R
-
-@Composable
-internal fun DtsCodeLineRow(
-    lineIndex: Int,
-    lineText: String,
-    dtsRevision: Int,
-    gutterWidth: Dp,
-    viewportWidth: Dp,
-    wordWrap: Boolean,
-    horizontalScrollValueProvider: () -> Int,
-    gutterBg: Color,
-    rowHighlightBg: Color,
-    dividerColor: Color,
-    isEditing: Boolean,
-    isMatchLine: Boolean,
-    palette: DtsSyntaxPalette,
-    lineMatches: List<DtsSearchMatch>?,
-    activeMatch: DtsSearchMatch?,
-    pendingCursorColumn: Int?,
-    focusTrigger: Int,
-    onTapLine: () -> Unit,
-    onLineChanged: (String) -> Unit,
-    onBackspaceAtStart: () -> Unit
-) {
-    val rowBaseModifier = if (wordWrap) {
-        Modifier.fillMaxWidth()
-    } else {
-        Modifier.widthIn(min = viewportWidth)
-    }
-
-    Row(
-        modifier = rowBaseModifier
-            .background(rowHighlightBg)
-            .clickable(enabled = !isEditing, onClick = onTapLine),
-        verticalAlignment = Alignment.Top
-    ) {
-        // Pinned Line Number Gutter (zero recomposition horizontal translation)
-        Box(
-            modifier = Modifier
-                .zIndex(1f)
-                .graphicsLayer {
-                    if (!wordWrap) {
-                        translationX = horizontalScrollValueProvider().toFloat()
-                    }
-                }
-                .width(gutterWidth)
-                .background(gutterBg)
-                .padding(top = 2.dp, bottom = 2.dp, end = 8.dp, start = 4.dp),
-            contentAlignment = Alignment.CenterEnd
-        ) {
-            Text(
-                text = (lineIndex + 1).toString(),
-                fontFamily = FontFamily.Monospace,
-                fontSize = 11.5.sp,
-                lineHeight = 20.sp,
-                textAlign = TextAlign.End,
-                fontWeight = if (isEditing || isMatchLine) FontWeight.Bold else FontWeight.Normal,
-                color = when {
-                    isEditing -> MaterialTheme.colorScheme.primary
-                    isMatchLine -> MaterialTheme.colorScheme.tertiary
-                    else -> MaterialTheme.colorScheme.outline
-                },
-                maxLines = 1
-            )
-        }
-
-        // Hairline gutter separator pinned with gutter
-        Box(
-            modifier = Modifier
-                .zIndex(1f)
-                .graphicsLayer {
-                    if (!wordWrap) {
-                        translationX = horizontalScrollValueProvider().toFloat()
-                    }
-                }
-                .width(1.dp)
-                .height(24.dp)
-                .background(dividerColor)
-        )
-
-        Spacer(modifier = Modifier.width(8.dp))
-
-        if (isEditing) {
-            val focusRequester = remember { FocusRequester() }
-            var fieldValue by remember(lineIndex, dtsRevision) {
-                val safeCursor = (pendingCursorColumn ?: lineText.length).coerceIn(0, lineText.length)
-                mutableStateOf(
-                    TextFieldValue(
-                        text = lineText,
-                        selection = TextRange(safeCursor)
-                    )
-                )
-            }
-
-            LaunchedEffect(lineText, dtsRevision) {
-                if (fieldValue.text != lineText) {
-                    val safeCursor = fieldValue.selection.start.coerceIn(0, lineText.length)
-                    fieldValue = TextFieldValue(text = lineText, selection = TextRange(safeCursor))
-                }
-            }
-
-            LaunchedEffect(focusTrigger) {
-                if (focusTrigger > 0) {
-                    val targetCol = pendingCursorColumn
-                    if (targetCol != null) {
-                        val safeCol = targetCol.coerceIn(0, fieldValue.text.length)
-                        fieldValue = fieldValue.copy(selection = TextRange(safeCol))
-                    }
-                    try {
-                        focusRequester.requestFocus()
-                    } catch (_: Exception) {}
-                }
-            }
-
-            val codeModifier = if (wordWrap) {
-                Modifier.weight(1f)
-            } else {
-                Modifier.widthIn(min = (viewportWidth - gutterWidth - 16.dp).coerceAtLeast(200.dp))
-            }
-
-            BasicTextField(
-                value = fieldValue,
-                onValueChange = { updated ->
-                    fieldValue = updated
-                    if (updated.text != lineText) {
-                        onLineChanged(updated.text)
-                    }
-                },
-                textStyle = TextStyle(
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 13.sp,
-                    lineHeight = 20.sp,
-                    color = MaterialTheme.colorScheme.onBackground
-                ),
-                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                modifier = codeModifier
-                    .padding(top = 2.dp, bottom = 2.dp, end = 24.dp)
-                    .focusRequester(focusRequester)
-                    .onPreviewKeyEvent { keyEvent ->
-                        if (keyEvent.type == KeyEventType.KeyDown &&
-                            keyEvent.key == Key.Backspace &&
-                            fieldValue.selection.collapsed &&
-                            fieldValue.selection.start == 0 &&
-                            lineIndex > 0
-                        ) {
-                            onBackspaceAtStart()
-                            true
-                        } else {
-                            false
-                        }
-                    }
-            )
-        } else {
-            val highlighted = remember(lineText, palette, lineMatches, activeMatch) {
-                DtsSyntaxHighlighter.buildHighlightedLine(
-                    line = lineText,
-                    palette = palette,
-                    lineMatches = lineMatches,
-                    activeMatch = activeMatch
-                )
-            }
-            val textModifier = if (wordWrap) {
-                Modifier
-                    .weight(1f)
-                    .padding(top = 2.dp, bottom = 2.dp, end = 16.dp)
-            } else {
-                Modifier
-                    .padding(top = 2.dp, bottom = 2.dp, end = 24.dp)
-            }
-            Text(
-                text = highlighted,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 13.sp,
-                lineHeight = 20.sp,
-                softWrap = wordWrap,
-                maxLines = if (wordWrap) Int.MAX_VALUE else 1,
-                modifier = textModifier
-            )
-        }
-    }
-}
 
 @Composable
 internal fun DtsSearchBar(
@@ -412,7 +216,7 @@ internal fun GoToLineDialog(
                     imeAction = ImeAction.Go
                 ),
                 keyboardActions = KeyboardActions(
-                    onGo = { if (isValid && parsedLine != null) onJump(parsedLine) }
+                    onGo = { if (isValid) onJump(parsedLine!!) }
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
