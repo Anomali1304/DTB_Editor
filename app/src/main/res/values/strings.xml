@@ -17,7 +17,24 @@
     <string name="empty_cluster_label">(empty)</string>
     <string name="apply_to_dts">Apply Topology</string>
     <string name="apply_fix_errors">Resolve Conflicts</string>
-    <string name="editor_info">%1$d parts (%2$d lines)</string>
+    <string name="editor_info">%1$d lines</string>
+    <string name="dts_search_placeholder">Search in DTS…</string>
+    <string name="dts_search_results_count">%1$d / %2$d</string>
+    <string name="dts_search_no_results">0 matches</string>
+    <string name="dts_search_action">Search</string>
+    <string name="dts_search_previous">Previous match</string>
+    <string name="dts_search_next">Next match</string>
+    <string name="dts_search_close">Close search</string>
+    <string name="dts_search_match_case">Match case</string>
+    <string name="dts_word_wrap">Toggle word wrap</string>
+    <string name="dts_go_to_line">Go to line</string>
+    <string name="dts_go_to_line_hint">Line number (1–%1$d)</string>
+    <string name="dts_jump_action">Jump</string>
+    <string name="dts_cancel_action">Cancel</string>
+    <string name="dts_insert_line">Insert Line</string>
+    <string name="dts_delete_line">Delete Line</string>
+    <string name="dts_copy_line">Copy Line</string>
+    <string name="dts_done_editing">Done</string>
     <string name="import_vb">Import Vendor Boot Image</string>
     <string name="import_dtb">Import Device Tree Blob</string>
 </resources>

@@ -20,6 +20,8 @@ import com.dtb.editor.fdt.parser.DtbPayloadStructure
 import com.dtb.editor.fdt.parser.DtsChunkUndoManager
 import com.dtb.editor.fdt.parser.DtsChunker
 import com.dtb.editor.fdt.parser.DtsFormatter
+import com.dtb.editor.fdt.parser.DtsLineEditAction
+import com.dtb.editor.fdt.parser.DtsLineUndoManager
 import com.dtb.editor.fdt.parser.DtsParser
 import com.dtb.editor.fdt.parser.VendorBoot
 import com.dtb.editor.fdt.parser.VendorBootImage
@@ -60,8 +62,18 @@ data class OpenFileState(
     val undoManager: DtsChunkUndoManager,
     val isModified: Boolean,
     val parsedAst: FdtNode,
-    val cpuTopology: CpuTopologyState
-)
+    val cpuTopology: CpuTopologyState,
+    val dtsLines: List<String> = splitDtsLines(currentDtsText),
+    val lineUndoManager: DtsLineUndoManager = DtsLineUndoManager(),
+    val dtsRevision: Int = 0
+) {
+    fun fullDtsText(): String = if (dtsLines.isNotEmpty()) dtsLines.joinToString("\n") else currentDtsText
+}
+
+private fun splitDtsLines(text: String): List<String> {
+    if (text.isEmpty()) return listOf("")
+    return text.split("\n").map { it.removeSuffix("\r") }
+}
 
 data class PendingMultiDtb(
     val fileName: String,
@@ -176,11 +188,12 @@ class DtbViewModel(
                     _isProcessing.value = true
                     withContext(Dispatchers.Default) {
                         try {
-                            val fullText = DtsChunker.join(current.chunks)
+                            val fullText = current.fullDtsText()
                             val parsed = DtsParser().parse(fullText)
                             val topology = topologyManager.extractTopology(parsed.rootNode)
                             _openFileState.value = current.copy(
                                 currentDtsText = fullText,
+                                chunks = DtsChunker.split(fullText),
                                 parsedAst = parsed.rootNode,
                                 cpuTopology = topology,
                                 isModified = false
@@ -311,6 +324,8 @@ class DtbViewModel(
         val topology = topologyManager.extractTopology(ast)
         val chunks = DtsChunker.split(decompileRes.dtsText)
         val undoManager = DtsChunkUndoManager()
+        val lines = splitDtsLines(decompileRes.dtsText)
+        val lineUndoManager = DtsLineUndoManager()
 
         _openFileState.value = OpenFileState(
             fileName = fileName,
@@ -327,9 +342,70 @@ class DtbViewModel(
             undoManager = undoManager,
             isModified = false,
             parsedAst = ast,
-            cpuTopology = topology
+            cpuTopology = topology,
+            dtsLines = lines,
+            lineUndoManager = lineUndoManager,
+            dtsRevision = 0
         )
         _activeTab.value = AppTab.CPU
+    }
+
+    fun updateDtsLine(lineIndex: Int, newText: String) {
+        val current = _openFileState.value ?: return
+        if (lineIndex !in current.dtsLines.indices) return
+        val oldText = current.dtsLines[lineIndex]
+        if (oldText == newText) return
+
+        current.lineUndoManager.recordAction(
+            DtsLineEditAction(
+                startLine = lineIndex,
+                oldLines = listOf(oldText),
+                newLines = listOf(newText)
+            )
+        )
+        val updatedLines = current.dtsLines.toMutableList()
+        updatedLines[lineIndex] = newText
+        _openFileState.value = current.copy(
+            dtsLines = updatedLines,
+            isModified = true
+        )
+    }
+
+    fun replaceDtsLines(
+        startLine: Int,
+        removeCount: Int,
+        newLines: List<String>,
+        focusLineAfterUndo: Int = startLine,
+        focusLineAfterRedo: Int = (startLine + newLines.size - 1).coerceAtLeast(0)
+    ) {
+        val current = _openFileState.value ?: return
+        val safeStart = startLine.coerceIn(0, current.dtsLines.size)
+        val safeRemove = removeCount.coerceAtMost((current.dtsLines.size - safeStart).coerceAtLeast(0))
+        val oldSlice = current.dtsLines.subList(safeStart, safeStart + safeRemove).toList()
+        if (oldSlice == newLines) return
+
+        current.lineUndoManager.recordAction(
+            DtsLineEditAction(
+                startLine = safeStart,
+                oldLines = oldSlice,
+                newLines = newLines,
+                focusLineAfterUndo = focusLineAfterUndo,
+                focusLineAfterRedo = focusLineAfterRedo
+            )
+        )
+        val updatedLines = current.dtsLines.toMutableList()
+        repeat(safeRemove) {
+            updatedLines.removeAt(safeStart)
+        }
+        updatedLines.addAll(safeStart, newLines)
+        if (updatedLines.isEmpty()) {
+            updatedLines.add("")
+        }
+        _openFileState.value = current.copy(
+            dtsLines = updatedLines,
+            isModified = true,
+            dtsRevision = current.dtsRevision + 1
+        )
     }
 
     fun updateDtsChunk(chunkIndex: Int, newText: String) {
@@ -341,32 +417,67 @@ class DtbViewModel(
         current.undoManager.recordAction(ChunkEditAction(chunkIndex, oldText, newText))
         val updatedChunks = current.chunks.toMutableList()
         updatedChunks[chunkIndex] = newText
+        val joined = DtsChunker.join(updatedChunks)
         _openFileState.value = current.copy(
             chunks = updatedChunks,
-            isModified = true
+            dtsLines = splitDtsLines(joined),
+            isModified = true,
+            dtsRevision = current.dtsRevision + 1
         )
     }
 
-    fun undo() {
-        val current = _openFileState.value ?: return
+    fun undo(): Int? {
+        val current = _openFileState.value ?: return null
+        if (current.lineUndoManager.canUndo) {
+            val lines = current.dtsLines.toMutableList()
+            val action = current.lineUndoManager.undo(lines)
+            if (action != null) {
+                _openFileState.value = current.copy(
+                    dtsLines = lines,
+                    isModified = true,
+                    dtsRevision = current.dtsRevision + 1
+                )
+                return action.focusLineAfterUndo.coerceIn(0, (lines.size - 1).coerceAtLeast(0))
+            }
+        }
         val chunks = current.chunks.toMutableList()
         if (current.undoManager.undo(chunks) != null) {
+            val joined = DtsChunker.join(chunks)
             _openFileState.value = current.copy(
                 chunks = chunks,
-                isModified = true
+                dtsLines = splitDtsLines(joined),
+                isModified = true,
+                dtsRevision = current.dtsRevision + 1
             )
         }
+        return null
     }
 
-    fun redo() {
-        val current = _openFileState.value ?: return
+    fun redo(): Int? {
+        val current = _openFileState.value ?: return null
+        if (current.lineUndoManager.canRedo) {
+            val lines = current.dtsLines.toMutableList()
+            val action = current.lineUndoManager.redo(lines)
+            if (action != null) {
+                _openFileState.value = current.copy(
+                    dtsLines = lines,
+                    isModified = true,
+                    dtsRevision = current.dtsRevision + 1
+                )
+                return action.focusLineAfterRedo.coerceIn(0, (lines.size - 1).coerceAtLeast(0))
+            }
+        }
         val chunks = current.chunks.toMutableList()
         if (current.undoManager.redo(chunks) != null) {
+            val joined = DtsChunker.join(chunks)
             _openFileState.value = current.copy(
                 chunks = chunks,
-                isModified = true
+                dtsLines = splitDtsLines(joined),
+                isModified = true,
+                dtsRevision = current.dtsRevision + 1
             )
         }
+        return null
     }
 
     fun applyCustomPlan(
@@ -379,7 +490,7 @@ class DtbViewModel(
             _isProcessing.value = true
             withContext(Dispatchers.Default) {
                 try {
-                    val fullText = DtsChunker.join(current.chunks)
+                    val fullText = current.fullDtsText()
                     val beforeAst = DtsParser().parse(fullText).rootNode
                     val parsed = DtsParser().parse(fullText)
                     val (success, msg) = topologyManager.applyCustomPlan(parsed.rootNode, clusterConfigs, syncCpufreq, customCapacities)
@@ -401,12 +512,16 @@ class DtbViewModel(
                     }
 
                     val newChunks = DtsChunker.split(formattedDts)
+                    current.lineUndoManager.clear()
+                    current.undoManager.clear()
                     _openFileState.value = current.copy(
                         currentDtsText = formattedDts,
                         chunks = newChunks,
+                        dtsLines = splitDtsLines(formattedDts),
                         parsedAst = parsed.rootNode,
                         cpuTopology = topologyManager.extractTopology(parsed.rootNode),
-                        isModified = false
+                        isModified = false,
+                        dtsRevision = current.dtsRevision + 1
                     )
                     _snackbarMessage.emit("Topology applied to DTS")
                 } catch (e: Exception) {
@@ -425,7 +540,7 @@ class DtbViewModel(
 
     fun prepareSaveBytes(): ByteArray? {
         val current = _openFileState.value ?: return null
-        val fullText = DtsChunker.join(current.chunks)
+        val fullText = current.fullDtsText()
         return try {
             if (fullText == current.originalDtsText && !current.isModified) {
                 return current.originalBytes
@@ -526,7 +641,7 @@ class DtbViewModel(
             _isProcessing.value = true
             withContext(Dispatchers.IO) {
                 try {
-                    val fullText = DtsChunker.join(current.chunks)
+                    val fullText = current.fullDtsText()
                     val bytesToSave = if (fullText == current.originalDtsText && !current.isModified) {
                         current.originalBytes
                     } else {
@@ -651,7 +766,7 @@ class DtbViewModel(
     fun getSuggestedFileName(): String {
         val current = _openFileState.value ?: return "output.dtb"
         val sizes = try {
-            val fullText = DtsChunker.join(current.chunks)
+            val fullText = current.fullDtsText()
             val root = DtsParser().parse(fullText).rootNode
             val top = topologyManager.extractTopology(root)
             top.clusters.map { it.cores.size }
