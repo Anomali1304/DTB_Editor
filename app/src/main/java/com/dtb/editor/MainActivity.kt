@@ -296,16 +296,10 @@ fun MainScreen(viewModel: DtbViewModel = viewModel()) {
                                 Button(onClick = { openLauncher.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth().height(56.dp)) {
                                     Icon(Icons.Default.FolderOpen, null)
                                     Spacer(modifier = Modifier.width(12.dp))
-                                    Text("Import Vendor Boot Image", style = MaterialTheme.typography.titleMedium)
+                                    Text(stringResource(R.string.import_vb), style = MaterialTheme.typography.titleMedium)
                                 }
                                 Spacer(modifier = Modifier.height(16.dp))
-                                OutlinedButton(onClick = { openLauncher.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth().height(56.dp)) {
-                                    Icon(Icons.Default.Code, null)
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text("Import Device Tree Blob", style = MaterialTheme.typography.titleMedium)
-                                }
-                                Spacer(modifier = Modifier.height(16.dp))
-                                ElevatedButton(
+                                FilledTonalButton(
                                     onClick = {
                                         coroutineScope.launch {
                                             val rooted = viewModel.checkRootAccess()

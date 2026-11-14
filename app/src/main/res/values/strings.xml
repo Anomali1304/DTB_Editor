@@ -39,5 +39,4 @@
     <string name="dts_copy_line">Copy Line</string>
     <string name="dts_done_editing">Done</string>
     <string name="import_vb">Import Vendor Boot Image</string>
-    <string name="import_dtb">Import Device Tree Blob</string>
 </resources>
