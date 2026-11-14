@@ -336,7 +336,13 @@ fun MainScreen(viewModel: DtbViewModel = viewModel()) {
                                             }
                                         }
                                         Box(modifier = Modifier.weight(1f)) {
-                                            AnimatedContent(targetState = activeTab, transitionSpec = { fadeIn(animationSpec = tween(300)) togetherWith fadeOut(animationSpec = tween(300)) }, label = "tab_transition") { targetTab ->
+                                            AnimatedContent(
+                                                targetState = activeTab,
+                                                transitionSpec = {
+                                                    fadeIn(animationSpec = tween(120)) togetherWith fadeOut(animationSpec = tween(80))
+                                                },
+                                                label = "tab_transition"
+                                            ) { targetTab ->
                                                 when (targetTab) {
                                                     AppTab.CPU -> CpuTopologyScreen(fileState = openFile, viewModel = viewModel)
                                                     AppTab.DTS -> EditorScreen(fileState = openFile, viewModel = viewModel)

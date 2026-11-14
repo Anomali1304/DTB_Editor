@@ -26,6 +26,7 @@ import com.dtb.editor.fdt.parser.DtsParser
 import com.dtb.editor.fdt.parser.DtsTextDeltaUndoManager
 import com.dtb.editor.fdt.parser.VendorBoot
 import com.dtb.editor.fdt.parser.VendorBootImage
+import com.dtb.editor.ui.editor.DtsBufferUndoManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -59,17 +60,18 @@ data class OpenFileState(
     val selectedEntryIndex: Int,
     val originalDtsText: String,
     val currentDtsText: String,
-    val chunks: List<String>,
-    val undoManager: DtsChunkUndoManager,
+    val chunks: List<String> = emptyList(),
+    val undoManager: DtsChunkUndoManager = DtsChunkUndoManager(),
     val isModified: Boolean,
     val parsedAst: FdtNode,
     val cpuTopology: CpuTopologyState,
     val dtsLines: List<String> = splitDtsLines(currentDtsText),
     val lineUndoManager: DtsLineUndoManager = DtsLineUndoManager(),
     val deltaUndoManager: DtsTextDeltaUndoManager = DtsTextDeltaUndoManager(),
+    val bufferUndoManager: DtsBufferUndoManager = DtsBufferUndoManager(),
     val dtsRevision: Int = 0
 ) {
-    fun fullDtsText(): String = if (dtsLines.isNotEmpty()) dtsLines.joinToString("\n") else currentDtsText
+    fun fullDtsText(): String = if (currentDtsText.isNotEmpty() || dtsLines.isEmpty()) currentDtsText else dtsLines.joinToString("\n")
 }
 
 private fun splitDtsLines(text: String): List<String> {
@@ -208,7 +210,6 @@ class DtbViewModel(
             _openFileState.value = current.copy(
                 currentDtsText = text,
                 dtsLines = splitDtsLines(text),
-                chunks = DtsChunker.split(text),
                 isModified = text != current.originalDtsText || current.isModified
             )
         }
@@ -230,7 +231,6 @@ class DtbViewModel(
                                 _openFileState.value = current.copy(
                                     currentDtsText = liveText,
                                     dtsLines = splitDtsLines(liveText),
-                                    chunks = DtsChunker.split(liveText),
                                     parsedAst = parsed.rootNode,
                                     cpuTopology = topology,
                                     isModified = false
@@ -360,11 +360,8 @@ class DtbViewModel(
         val decompileRes = dtcEngine.decompileBytes(selectedFdt).getOrThrow()
         val ast = decompileRes.rootNode
         val topology = topologyManager.extractTopology(ast)
-        val chunks = DtsChunker.split(decompileRes.dtsText)
-        val undoManager = DtsChunkUndoManager()
         val lines = splitDtsLines(decompileRes.dtsText)
-        val lineUndoManager = DtsLineUndoManager()
-        val deltaUndoManager = DtsTextDeltaUndoManager()
+        val bufferUndoManager = DtsBufferUndoManager()
         val nextRevision = (_openFileState.value?.dtsRevision ?: 0) + 1
 
         _openFileState.value = OpenFileState(
@@ -378,14 +375,11 @@ class DtbViewModel(
             selectedEntryIndex = selectedIndex,
             originalDtsText = decompileRes.dtsText,
             currentDtsText = decompileRes.dtsText,
-            chunks = chunks,
-            undoManager = undoManager,
             isModified = false,
             parsedAst = ast,
             cpuTopology = topology,
             dtsLines = lines,
-            lineUndoManager = lineUndoManager,
-            deltaUndoManager = deltaUndoManager,
+            bufferUndoManager = bufferUndoManager,
             dtsRevision = nextRevision
         )
         _activeTab.value = AppTab.CPU
@@ -552,13 +546,12 @@ class DtbViewModel(
                         return@withContext
                     }
 
-                    val newChunks = DtsChunker.split(formattedDts)
                     current.lineUndoManager.clear()
                     current.undoManager.clear()
                     current.deltaUndoManager.clear()
+                    current.bufferUndoManager.clear()
                     _openFileState.value = current.copy(
                         currentDtsText = formattedDts,
-                        chunks = newChunks,
                         dtsLines = splitDtsLines(formattedDts),
                         parsedAst = parsed.rootNode,
                         cpuTopology = topologyManager.extractTopology(parsed.rootNode),

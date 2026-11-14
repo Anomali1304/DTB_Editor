@@ -21,6 +21,9 @@ import com.dtb.editor.fdt.parser.DtsLineUndoManager
 import com.dtb.editor.fdt.parser.DtsParser
 import com.dtb.editor.fdt.parser.DtsSyntaxAligner
 import com.dtb.editor.fdt.parser.DtsTextDeltaUndoManager
+import com.dtb.editor.ui.editor.DtsBufferUndoManager
+import com.dtb.editor.ui.editor.DtsCodeEditorView
+import com.dtb.editor.ui.editor.DtsDocumentBuffer
 import com.dtb.editor.ui.screens.DtsOffsetSearchEngine
 import com.dtb.editor.ui.screens.DtsSearchEngine
 import com.dtb.editor.ui.screens.DtsSyntaxHighlighter
@@ -30,6 +33,7 @@ import com.dtb.editor.ui.screens.EditorScreen
 import com.dtb.editor.viewmodel.DtbViewModel
 import com.dtb.editor.viewmodel.InputFileType
 import com.dtb.editor.viewmodel.OpenFileState
+import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -296,5 +300,71 @@ opp-hz = /bits/ 64 <1000000000>;
 """.trimIndent() + "\n"
 
         assertEquals(expected, aligned)
+    }
+
+    @Test
+    fun testDtsDocumentBufferMultiLineEditUndoRedoAndSearch() {
+        val sb = StringBuilder(600_000)
+        for (i in 1..20000) {
+            if (i == 15432) {
+                sb.append("    target_cluster_node { capacity-dmips-mhz = <1024>; };\n")
+            } else {
+                sb.append("    node_$i { reg = <0x0 0x${Integer.toHexString(i)}>; };\n")
+            }
+        }
+        val buffer = DtsDocumentBuffer(sb.toString())
+        assertEquals(20001, buffer.lineCount)
+
+        val matches = buffer.findAllMatches("target_cluster_node", matchCase = true)
+        assertEquals(1, matches.size)
+        assertEquals(15431, matches[0].lineIndex)
+
+        val undoMgr = DtsBufferUndoManager()
+        val line1Start = buffer.getLineStartOffset(1)
+        val line3End = buffer.lineColToOffset(3, buffer.getLineLength(3))
+        val deleted = buffer.extractRange(line1Start, line3End)
+        undoMgr.recordChange(line1Start, deleted, "")
+        buffer.replaceRangeOffsets(line1Start, line3End, "")
+        assertEquals(19999, buffer.lineCount)
+
+        assertNotNull(undoMgr.undo(buffer))
+        assertEquals(20001, buffer.lineCount)
+        assertEquals(deleted, buffer.extractRange(line1Start, line3End))
+
+        assertNotNull(undoMgr.redo(buffer))
+        assertEquals(19999, buffer.lineCount)
+    }
+
+    @Test
+    fun testDtsCodeEditorViewSelectionCutPasteSmartEnterAndFormat() {
+        val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val editor = DtsCodeEditorView(ctx)
+        val undoMgr = DtsBufferUndoManager()
+        val initial = "/dts-v1/;\n/ {\n    cpu@0 {\n    };\n};\n"
+        editor.setDocumentText(initial, revision = 1, undoManager = undoMgr)
+
+        // Position cursor right after "cpu@0 {" on line 2 and press Enter via IME -> smart 8-space indent
+        val braceEndOffset = initial.indexOf("cpu@0 {") + "cpu@0 {".length
+        editor.setSelectionOffsets(braceEndOffset, braceEndOffset)
+        editor.imeCommitText("\n", 1)
+        assertTrue(editor.buffer.getFullText().contains("cpu@0 {\n        \n"))
+
+        // Select across multiple lines and cut, then paste back
+        val fullBeforeCut = editor.buffer.getFullText()
+        val selStart = fullBeforeCut.indexOf("cpu@0")
+        val selEnd = fullBeforeCut.indexOf("};") + 2
+        editor.setSelectionOffsets(selStart, selEnd, showHandles = true)
+        assertTrue(editor.cutSelection())
+        assertFalse(editor.buffer.getFullText().contains("cpu@0"))
+        assertTrue(editor.pasteFromClipboard())
+        assertTrue(editor.buffer.getFullText().contains("cpu@0"))
+
+        // Apply messy line, align syntax, and undo back cleanly
+        editor.setDocumentText("/ {\ncpu@0{\n};\n};\n", revision = 2, undoManager = DtsBufferUndoManager())
+        val aligned = DtsSyntaxAligner.align(editor.buffer.getFullText())
+        assertTrue(editor.applyAlignedText(aligned))
+        assertTrue(editor.buffer.getFullText().contains("    cpu@0 {\n"))
+        assertTrue(editor.performUndo())
+        assertTrue(editor.buffer.getFullText().contains("\ncpu@0{\n"))
     }
 }

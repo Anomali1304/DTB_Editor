@@ -2,6 +2,7 @@ package com.dtb.editor.ui.screens
 
 import android.view.ViewGroup
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -33,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.dtb.editor.R
 import com.dtb.editor.fdt.parser.DtsSyntaxAligner
+import com.dtb.editor.ui.editor.DtsCodeEditorView
 import com.dtb.editor.viewmodel.DtbViewModel
 import com.dtb.editor.viewmodel.OpenFileState
 import kotlinx.coroutines.Dispatchers
@@ -49,15 +51,19 @@ fun EditorScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
-    var editTextRef by remember { mutableStateOf<DtsCodeEditText?>(null) }
-    var canUndo by remember(fileState.deltaUndoManager) { mutableStateOf(fileState.deltaUndoManager.canUndo) }
-    var canRedo by remember(fileState.deltaUndoManager) { mutableStateOf(fileState.deltaUndoManager.canRedo) }
+    var editorViewRef by remember { mutableStateOf<DtsCodeEditorView?>(null) }
+    var canUndo by remember(fileState.bufferUndoManager) { mutableStateOf(fileState.bufferUndoManager.canUndo) }
+    var canRedo by remember(fileState.bufferUndoManager) { mutableStateOf(fileState.bufferUndoManager.canRedo) }
     var currentCursorLine by remember { mutableIntStateOf(1) }
     var totalLines by remember(fileState.dtsRevision, fileState.dtsLines.size) {
         mutableIntStateOf(fileState.dtsLines.size.coerceAtLeast(1))
     }
     var hasEditorFocus by remember { mutableStateOf(false) }
     var textMutationTick by remember { mutableIntStateOf(0) }
+
+    // Cached snapshot for zero-allocation incremental search while typing in search bar
+    var cachedSearchSnapshot by remember(fileState.dtsRevision) { mutableStateOf<String?>(fileState.fullDtsText()) }
+    var cachedSnapshotTick by remember(fileState.dtsRevision) { mutableIntStateOf(0) }
 
     var wordWrap by remember { mutableStateOf(false) }
 
@@ -97,34 +103,41 @@ fun EditorScreen(
     val gutterActiveTextColor = colorScheme.primary.toArgb()
     val activeLineHighlightColor = colorScheme.primary.copy(alpha = 0.08f).toArgb()
 
-    // Connect ViewModel to the live native EditText buffer without copying text on every keystroke
+    // Connect ViewModel to the live virtualized buffer lazily on save / flash / tab switch
     DisposableEffect(viewModel) {
         viewModel.liveDtsTextProvider = {
-            editTextRef?.text?.toString() ?: viewModel.openFileState.value?.fullDtsText().orEmpty()
+            editorViewRef?.buffer?.getFullText() ?: viewModel.openFileState.value?.fullDtsText().orEmpty()
         }
         onDispose {
-            editTextRef?.text?.toString()?.let { latest ->
+            editorViewRef?.buffer?.getFullText()?.let { latest ->
                 viewModel.commitLiveDtsText(latest)
             }
             viewModel.liveDtsTextProvider = null
         }
     }
 
-    // Async background search across the live full-document buffer
+    // Async background search without blocking UI thread
     LaunchedEffect(isSearchVisible, searchQuery, matchCase, textMutationTick, fileState.dtsRevision) {
         if (!isSearchVisible || searchQuery.isEmpty()) {
             searchMatches = emptyList()
             activeMatchIndex = 0
             lastScrolledQueryKey = null
             withContext(Dispatchers.Main.immediate) {
-                editTextRef?.setSearchHighlights(emptyList(), -1)
+                editorViewRef?.setSearchHighlights(emptyList(), -1)
             }
             return@LaunchedEffect
         }
 
-        delay(60)
+        delay(45)
         val liveText = withContext(Dispatchers.Main.immediate) {
-            editTextRef?.text?.toString() ?: fileState.fullDtsText()
+            if (cachedSearchSnapshot != null && cachedSnapshotTick == textMutationTick) {
+                cachedSearchSnapshot!!
+            } else {
+                val fresh = editorViewRef?.buffer?.getFullText() ?: fileState.fullDtsText()
+                cachedSearchSnapshot = fresh
+                cachedSnapshotTick = textMutationTick
+                fresh
+            }
         }
         val found = withContext(Dispatchers.Default) {
             DtsOffsetSearchEngine.findAllMatches(liveText, searchQuery, matchCase)
@@ -133,13 +146,13 @@ fun EditorScreen(
         withContext(Dispatchers.Main.immediate) {
             searchMatches = found
             val currentQueryKey = searchQuery to matchCase
+            val shouldJumpToMatch = lastScrolledQueryKey != currentQueryKey
             if (found.isNotEmpty()) {
-                val nextIdx = if (lastScrolledQueryKey != currentQueryKey) {
+                val nextIdx = if (shouldJumpToMatch) {
                     lastScrolledQueryKey = currentQueryKey
-                    val editor = editTextRef
-                    val currentTopLine = if (editor != null && editor.layout != null) {
-                        val topY = (editor.scrollY - editor.totalPaddingTop).coerceAtLeast(0)
-                        editor.layout.getLineForVertical(topY)
+                    val editor = editorViewRef
+                    val currentTopLine = if (editor != null && editor.lineCountCompat > 0) {
+                        editor.firstVisibleLogicalLine()
                     } else {
                         0
                     }
@@ -148,20 +161,20 @@ fun EditorScreen(
                     activeMatchIndex.coerceIn(0, found.lastIndex)
                 }
                 activeMatchIndex = nextIdx
-                editTextRef?.setSearchHighlights(found, nextIdx)
-                if (lastScrolledQueryKey == currentQueryKey) {
-                    editTextRef?.scrollToMatch(found[nextIdx])
+                editorViewRef?.setSearchHighlights(found, nextIdx)
+                if (shouldJumpToMatch) {
+                    editorViewRef?.scrollToMatch(found[nextIdx])
                 }
             } else {
                 activeMatchIndex = 0
-                editTextRef?.setSearchHighlights(emptyList(), -1)
+                editorViewRef?.setSearchHighlights(emptyList(), -1)
             }
         }
     }
 
     LaunchedEffect(isSearchVisible) {
         if (isSearchVisible) {
-            delay(80)
+            delay(30)
             try {
                 searchFocusRequester.requestFocus()
             } catch (_: Exception) {}
@@ -174,7 +187,7 @@ fun EditorScreen(
             onDismiss = { showGoToLineDialog = false },
             onJump = { lineOneBased ->
                 showGoToLineDialog = false
-                editTextRef?.jumpToLogicalLine(lineOneBased)
+                editorViewRef?.jumpToLogicalLine(lineOneBased)
             }
         )
     }
@@ -199,7 +212,7 @@ fun EditorScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(
-                    onClick = { editTextRef?.performUndo() },
+                    onClick = { editorViewRef?.performUndo() },
                     enabled = canUndo,
                     modifier = Modifier
                         .minimumInteractiveComponentSize()
@@ -213,7 +226,7 @@ fun EditorScreen(
                 }
 
                 IconButton(
-                    onClick = { editTextRef?.performRedo() },
+                    onClick = { editorViewRef?.performRedo() },
                     enabled = canRedo,
                     modifier = Modifier
                         .minimumInteractiveComponentSize()
@@ -232,7 +245,7 @@ fun EditorScreen(
                         isSearchVisible = open
                         if (!open) {
                             searchQuery = ""
-                            editTextRef?.setSearchHighlights(emptyList(), -1)
+                            editorViewRef?.setSearchHighlights(emptyList(), -1)
                         }
                     },
                     modifier = Modifier
@@ -251,7 +264,7 @@ fun EditorScreen(
                     checked = wordWrap,
                     onCheckedChange = { wrap ->
                         wordWrap = wrap
-                        editTextRef?.setWordWrapEnabled(wrap)
+                        editorViewRef?.setWordWrapEnabled(wrap)
                     },
                     modifier = Modifier
                         .minimumInteractiveComponentSize()
@@ -267,8 +280,8 @@ fun EditorScreen(
 
                 IconButton(
                     onClick = {
-                        val editor = editTextRef ?: return@IconButton
-                        val currentSnapshot = editor.text?.toString() ?: return@IconButton
+                        val editor = editorViewRef ?: return@IconButton
+                        val currentSnapshot = editor.buffer.getFullText()
                         coroutineScope.launch {
                             val aligned = withContext(Dispatchers.Default) {
                                 DtsSyntaxAligner.align(currentSnapshot)
@@ -326,11 +339,11 @@ fun EditorScreen(
             }
         }
 
-        // Expandable Fast Search Bar
+        // Expandable Fast Search Bar (0ms editor resize overhead)
         AnimatedVisibility(
             visible = isSearchVisible,
-            enter = expandVertically() + fadeIn(),
-            exit = shrinkVertically() + fadeOut()
+            enter = expandVertically(tween(120)) + fadeIn(tween(120)),
+            exit = shrinkVertically(tween(100)) + fadeOut(tween(100))
         ) {
             DtsSearchBar(
                 query = searchQuery,
@@ -344,22 +357,22 @@ fun EditorScreen(
                     if (searchMatches.isNotEmpty()) {
                         val prev = if (activeMatchIndex - 1 < 0) searchMatches.lastIndex else activeMatchIndex - 1
                         activeMatchIndex = prev
-                        editTextRef?.setSearchHighlights(searchMatches, prev)
-                        editTextRef?.scrollToMatch(searchMatches[prev])
+                        editorViewRef?.setSearchHighlights(searchMatches, prev)
+                        editorViewRef?.scrollToMatch(searchMatches[prev])
                     }
                 },
                 onNextMatch = {
                     if (searchMatches.isNotEmpty()) {
                         val next = (activeMatchIndex + 1) % searchMatches.size
                         activeMatchIndex = next
-                        editTextRef?.setSearchHighlights(searchMatches, next)
-                        editTextRef?.scrollToMatch(searchMatches[next])
+                        editorViewRef?.setSearchHighlights(searchMatches, next)
+                        editorViewRef?.scrollToMatch(searchMatches[next])
                     }
                 },
                 onClose = {
                     isSearchVisible = false
                     searchQuery = ""
-                    editTextRef?.setSearchHighlights(emptyList(), -1)
+                    editorViewRef?.setSearchHighlights(emptyList(), -1)
                     focusManager.clearFocus()
                 }
             )
@@ -367,10 +380,10 @@ fun EditorScreen(
 
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-        // Full-Document Native Code Editor (unlimited free multi-line selection, handles, cut/copy/paste, fast 2D scrolling)
+        // Virtualized O(visible lines) Full-Document Code Editor
         AndroidView(
-            factory = { context ->
-                DtsCodeEditText(context).apply {
+            factory = { viewCtx ->
+                DtsCodeEditorView(viewCtx).apply {
                     layoutParams = ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
@@ -399,40 +412,21 @@ fun EditorScreen(
                     setDocumentText(
                         fullText = fileState.fullDtsText(),
                         revision = fileState.dtsRevision,
-                        undoManager = fileState.deltaUndoManager
+                        undoManager = fileState.bufferUndoManager
                     )
                     setWordWrapEnabled(wordWrap)
-                    editTextRef = this
+                    editorViewRef = this
                 }
             },
             update = { view ->
-                editTextRef = view
-                view.onDirtyCallback = { viewModel.markDtsModified() }
-                view.onUndoRedoChanged = { u, r ->
-                    canUndo = u
-                    canRedo = r
-                }
-                view.onCursorPositionChanged = { cur, tot ->
-                    currentCursorLine = cur
-                    totalLines = tot
-                }
-                view.onTextMutated = { textMutationTick++ }
-                view.applyThemeColors(
-                    palette = syntaxPalette,
-                    gutterBgColor = gutterBgColor,
-                    gutterDividerColor = gutterDividerColor,
-                    gutterTextColor = gutterTextColor,
-                    gutterActiveTextColor = gutterActiveTextColor,
-                    activeLineHighlightColor = activeLineHighlightColor
-                )
-                view.setWordWrapEnabled(wordWrap)
+                editorViewRef = view
                 if (view.appliedRevision != fileState.dtsRevision ||
-                    view.deltaUndoManager !== fileState.deltaUndoManager
+                    view.undoManager !== fileState.bufferUndoManager
                 ) {
                     view.setDocumentText(
                         fullText = fileState.fullDtsText(),
                         revision = fileState.dtsRevision,
-                        undoManager = fileState.deltaUndoManager
+                        undoManager = fileState.bufferUndoManager
                     )
                 }
             },
