@@ -360,4 +360,42 @@ class CpuTopologyPreviewTest {
             assertTrue("Preset $preset apply failed: $report", success)
         }
     }
+
+    @Test
+    fun testFourTwoOneOneSharedPolicyPreviewAndApply() {
+        val root = dtsParser.parse(STOCK_MT6789_DTS).rootNode
+        val cores = engine.extractCpuCores(root)
+        val controller = engine.discoverPerformanceController(root, cores)!!
+
+        val configs4211 = listOf(
+            ClusterConfig(clusterIndex = 0, cpuIndices = listOf(0, 1, 2, 3), selectedDomainSlot = 0x11bc10L),
+            ClusterConfig(clusterIndex = 1, cpuIndices = listOf(4, 5), selectedDomainSlot = 0x11be50L),
+            ClusterConfig(clusterIndex = 2, cpuIndices = listOf(6), selectedDomainSlot = 0x11bd30L),
+            ClusterConfig(clusterIndex = 3, cpuIndices = listOf(7), selectedDomainSlot = 0x11bd30L)
+        )
+
+        val preview = engine.previewPlan(configs4211, cores, controller, syncCpufreq = true)
+        assertTrue("4+2+1+1 with 3 shared CSRAM slots must be valid", preview.isValid)
+        assertEquals(4, preview.assignedSlots.size)
+        assertEquals(3, preview.assignedSlots.values.toSet().size)
+        assertFalse(
+            "4+2+1+1 must not map any A55 core onto Big domain 0x11bd30",
+            preview.warnings.any { it.contains("A55 hardware is rated for max 2000 MHz") }
+        )
+
+        val (success, report) = engine.applyPlanToAst(root, preview.plan, cores, controller, preview.assignedSlots)
+        assertTrue("Applying 4+2+1+1 must succeed: $report", success)
+
+        val formattedDts = dtsFormatter.format(root, emptyList())
+        val reparsedRoot = dtsParser.parse(formattedDts).rootNode
+        val cpuMapNode = reparsedRoot.findChild("cpus")!!.findChild("cpu-map")!!
+        assertEquals(4, cpuMapNode.children.size)
+        assertEquals(4, cpuMapNode.children[0].children.size)
+        assertEquals(2, cpuMapNode.children[1].children.size)
+        assertEquals(1, cpuMapNode.children[2].children.size)
+        assertEquals(1, cpuMapNode.children[3].children.size)
+
+        val updatedDomains = engine.extractCpuCores(reparsedRoot).map { it.originalPerfDomainIndex }
+        assertEquals(listOf(0, 0, 0, 0, 2, 2, 1, 1), updatedDomains)
+    }
 }
